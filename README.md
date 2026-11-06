@@ -2,13 +2,53 @@
 
 当前版本：**0.2.1**。详细变化见 [CHANGELOG.md](CHANGELOG.md)。
 
+[![Build and release](https://github.com/lxw112190/lw.CleanC/actions/workflows/ci.yml/badge.svg)](https://github.com/lxw112190/lw.CleanC/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 面向自己使用的 Windows C 盘空间分析与缓存清理工具。C# / .NET 10 / WPF，JSON 定义清理规则，无第三方 NuGet 依赖。
 
 ## 运行
 
-对外发送 **`CleanC-win-x64-portable.zip`**，解压整个包，运行 `CleanC.exe`。此版本自带 .NET 与 WPF 运行时，对方不需要额外安装 .NET，适用于 Windows 10/11 x64。程序默认以普通用户运行；数据保存在可执行文件旁的 `Data` 目录，因此请解压到自己可写的目录，不要放到 Program Files。
+在 [GitHub Releases](https://github.com/lxw112190/lw.CleanC/releases) 下载 Windows 10/11 x64 版本：
 
-当前便携版需要保持整个目录完整，不能只发送一个 exe。`Rules/default.rules.json` 在首次运行时复制为 `Data/rules.json`。之后更新程序不会自动覆盖个人规则。早期名称含 `framework-dependent` 的包需要额外安装 .NET 10 Desktop Runtime，已经不再作为默认发行包。
+| 发布包 | 面向用户 | 运行环境 |
+| --- | --- | --- |
+| `lw.CleanC-v版本-win-x64-portable.zip`（推荐） | 希望解压即用的用户 | 自带 .NET/WPF 运行时，无需安装 .NET |
+| `lw.CleanC-v版本-win-x64-framework-dependent.zip`（精简版） | 已安装 .NET 环境的用户 | 需要 [.NET 10 Desktop Runtime x64](https://dotnet.microsoft.com/en-us/download/dotnet/10.0) |
+
+**运行软件不需要 .NET SDK。** SDK 用于编译开发；这里两种包的区别是是否自带运行时。本地构建的同类 ZIP 使用 `CleanC-` 前缀。
+
+完整解压 ZIP 后运行 `CleanC.exe`。程序默认以普通用户运行；数据保存在可执行文件旁的 `Data` 目录，因此请解压到自己可写的目录，不要放到 Program Files。
+
+两种版本都需要保持整个目录完整，不能只发送一个 exe。`Rules/default.rules.json` 在首次运行时复制为 `Data/rules.json`。之后更新程序不会自动覆盖个人规则。下载后可按 `SHA256SUMS.txt` 校验 ZIP 完整性。
+
+## 软件截图
+
+以下图片由实际 WPF 界面渲染，使用演示数据；文件路径、占用和重复分组仅用于介绍功能。
+
+### 空间概览
+
+查看 C 盘容量、缓存扫描结果，并进入分类清理或目录分析。
+
+![空间概览](docs/screenshots/overview.png)
+
+### 分类清理
+
+查看清理影响、保留天数和文件明细，支持搜索全部结果、翻页与排除文件。
+
+![分类清理和文件预览](docs/screenshots/cleanup.png)
+
+### 空间分析
+
+矩形面积表示目录逻辑大小，支持目录下钻、大文件定位和文件类型统计。
+
+![目录占用矩形图和大文件排行](docs/screenshots/analysis.png)
+
+### 重复文件
+
+按文件内容分组，查看同组文件路径；重复检查仅展示和定位，不自动删除。
+
+![重复文件分组与路径](docs/screenshots/duplicates.png)
 
 ## 已实现
 
@@ -88,7 +128,7 @@ dotnet run --project tests/CleanC.UiTests -c Release
 powershell -ExecutionPolicy Bypass -File scripts/build.ps1
 ```
 
-最后一个命令执行构建、核心测试、WPF 组件与渲染检查，再生成自带运行时的 `dist/CleanC-portable-win-x64`、`dist/CleanC-win-x64-portable.zip` 与 SHA256 校验文件。39 项核心测试仅操作 `artifacts/tests` 内的隔离文件，涵盖修改/替换文件、锁、排除项、暂停/取消、硬链接、目录联接、统计、矩形图与重复文件分阶段校验。渲染测试使用样本数据，输出六个页面在两种尺寸下的 PNG 到 `artifacts/ui`，并检查搜索、翻页、类型切换和导航状态。它不能替代完整的人工桌面交互验收。
+最后一个命令执行构建、核心测试、WPF 组件与渲染检查，再生成便携版 `dist/CleanC-portable-win-x64`、精简版 `dist/CleanC-framework-dependent-win-x64`，以及两个 ZIP 和 SHA256 校验文件。39 项核心测试仅操作 `artifacts/tests` 内的隔离文件，涵盖修改/替换文件、锁、排除项、暂停/取消、硬链接、目录联接、统计、矩形图与重复文件分阶段校验。渲染测试使用样本数据，输出六个页面在两种尺寸下的 PNG 到 `artifacts/ui`，并检查搜索、翻页、类型切换和导航状态。它不能替代完整的人工桌面交互验收。
 
 ## 参考资料
 
@@ -104,4 +144,33 @@ API 与默认缓存位置参考：
 - [NuGet：管理全局包和缓存目录](https://learn.microsoft.com/en-us/nuget/consume-packages/managing-the-global-packages-and-cache-folders)
 - [uv：缓存](https://docs.astral.sh/uv/concepts/cache/)
 
-本地自用原型，目前没有选择对外分发的开源许可证。
+## 自动构建与发布
+
+`main` 提交、Pull Request 和手动运行会在 Windows 上构建、测试并上传两种 ZIP；手动运行不会发布 Release。推送与项目版本一致的 `v*` 标签后，会在全部检查通过后自动发布 GitHub Release。
+
+例如当前 `src/CleanC.App/CleanC.App.csproj` 中的版本为 `0.2.1`，提交代码后执行：
+
+```powershell
+git tag v0.2.1
+git push origin v0.2.1
+```
+
+标签必须与项目版本完全一致。后续发布先修改项目版本及 CHANGELOG，再提交和推送对应标签。CI 使用仓库自带的 `GITHUB_TOKEN`，无需额外配置个人访问令牌；只有发布任务具有 `contents: write` 权限。标签重跑时可继续未完成的草稿，已发布的 Release 不覆盖。
+
+每次构建会验证核心逻辑、WPF 布局，解压两个 ZIP 并检查实际运行时来源，生成 `SHA256SUMS.txt`。便携版应从包内加载 CLR/WPF，精简版应使用已安装的运行时；两个包都附带 MIT 许可证。自带运行时仍保留其自身许可证和第三方声明。
+
+本地生成带版本号的同类附件：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/build.ps1 -Versioned
+```
+
+更新 README 的界面截图：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/update-screenshots.ps1
+```
+
+## 许可证
+
+本项目采用 [MIT License](LICENSE)，版权归 lxw112190 所有。随便携包分发的 .NET/WPF 运行时及其他第三方组件遵循各自许可证，相关声明保留在发行目录中。

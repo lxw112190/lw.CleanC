@@ -1,0 +1,119 @@
+name: Build and release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
+jobs:
+  build:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+      - name: Check tag matches project version
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          [xml]$project = Get-Content src/CleanC.App/CleanC.App.csproj -Raw
+          $version = [string]$project.Project.PropertyGroup.Version
+          if ($env:REF_TYPE -eq 'tag' -and $env:RELEASE_TAG -cne "v$version") {
+            throw "Tag $env:RELEASE_TAG must match project version v$version"
+          }
+      - name: Build, test, package and verify both editions
+        run: ./scripts/build.ps1 -Versioned
+      - name: Upload release packages
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-packages
+          compression-level: 0
+          if-no-files-found: error
+          path: |
+            dist/lw.CleanC-v*-win-x64-portable.zip
+            dist/lw.CleanC-v*-win-x64-framework-dependent.zip
+            dist/SHA256SUMS.txt
+      - name: Upload UI renders
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ui-renders
+          path: artifacts/ui/*.png
+          if-no-files-found: ignore
+          retention-days: 7
+
+  release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-packages
+          path: release
+      - name: Verify checksums
+        working-directory: release
+        run: sha256sum --check SHA256SUMS.txt
+      - name: Create and publish GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = $env:RELEASE_TAG
+          $assets = @(Get-ChildItem release/*.zip) + @(Get-Item release/SHA256SUMS.txt)
+          $assetPaths = @($assets.FullName)
+          if (($assets | Where-Object Extension -eq '.zip').Count -ne 2) { throw 'Expected exactly two packages' }
+          $notes = @'
+          ## 下载 / Downloads
+
+          - **portable.zip（推荐）**：自带 .NET/WPF 运行时，无需安装 .NET。Includes the .NET/WPF runtime.
+          - **framework-dependent.zip（精简版）**：需要安装 .NET 10 Desktop Runtime x64。Requires .NET 10 Desktop Runtime x64.
+
+          两种包均面向 Windows 10/11 x64，完整解压后运行 CleanC.exe。运行软件不需要开发用的 .NET SDK。
+          Both editions target Windows 10/11 x64. Extract the entire ZIP and run CleanC.exe; no SDK is required.
+
+          SHA256SUMS.txt 提供两个 ZIP 的校验值。MIT 许可证及运行时第三方声明已随包附带。
+          Both ZIPs include the MIT license and relevant runtime notices. Verify downloads using SHA256SUMS.txt.
+          '@
+          $notesPath = Join-Path $env:RUNNER_TEMP 'release-notes.md'
+          Set-Content -LiteralPath $notesPath -Value $notes -Encoding utf8
+          $existing = gh release view $tag --json isDraft 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            if (-not ($existing | ConvertFrom-Json).isDraft) {
+              Write-Host 'Release already published; leaving existing assets unchanged.'
+              exit 0
+            }
+            gh release upload $tag @assetPaths --clobber
+            if ($LASTEXITCODE -ne 0) { throw 'Asset upload failed' }
+          } else {
+            $arguments = @('release','create',$tag) + @($assets.FullName) + @('--verify-tag','--draft','--title',"lw.CleanC $tag",'--notes-file',$notesPath)
+            if ($tag.Contains('-')) { $arguments += '--prerelease' }
+            & gh @arguments
+            if ($LASTEXITCODE -ne 0) { throw 'Draft release creation failed' }
+          }
+          gh release edit $tag --draft=false --notes-file $notesPath
+          if ($LASTEXITCODE -ne 0) { throw 'Release publication failed' }

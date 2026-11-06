@@ -15,6 +15,7 @@ internal static class Program
     [STAThread]
     private static int Main()
     {
+        System.Windows.Media.RenderOptions.ProcessRenderMode = RenderMode.SoftwareOnly;
         var app = new App(); app.InitializeComponent();
         var window = new MainWindow();
         var root = (FrameworkElement)window.Content;
@@ -27,6 +28,10 @@ internal static class Program
         string output = Path.GetFullPath("artifacts/ui"); Directory.CreateDirectory(output);
         var errors = new List<string>();
         var pages = (TabControl)window.FindName("Pages");
+        ((TextBlock)window.FindName("FreeText")).Text = "64 GB";
+        ((TextBlock)window.FindName("DriveDetail")).Text = "已用 192 GB / 总计 256 GB · 示例数据";
+        ((ProgressBar)window.FindName("DriveBar")).Value = 75;
+        ((TextBlock)window.FindName("StatusText")).Text = "软件界面示例 · 使用演示数据，未扫描或清理用户文件。";
         if (pages.Items.Count != 6) errors.Add("Expected 6 pages");
         if (((TextBlock)window.FindName("RuleCount")).Text != "11") errors.Add("Rules did not load");
         if (((Button)window.FindName("CleanButton")).IsEnabled) errors.Add("Cleaning enabled without preview");
@@ -39,11 +44,14 @@ internal static class Program
         for (int i = 0; i < 420; i++) sample.Files.Add(sample.Files[0] with { Path = $@"C:\Example\npm-cache\_cacache\package-{i:000}.bin", Size = 1000000 + i });
         ((DataGrid)window.FindName("RulesGrid")).ItemsSource = new[] { sample };
         ((DataGrid)window.FindName("RulesGrid")).SelectedItem = sample;
+        ((TextBlock)window.FindName("CacheTotal")).Text = sample.SizeText;
         UsageEntry[] mapEntries = [new(@"C:\Example", 987654321, 120) { Percent = 60 }, new(@"C:\Downloads", 400000000, 52) { Percent = 25 }, new(@"C:\Applications", 160000000, 120) { Percent = 10 }, new(@"C:\Temp", 80000000, 200) { Percent = 5 }];
         ((DataGrid)window.FindName("FoldersGrid")).ItemsSource = mapEntries;
         ((UsageMap)window.FindName("DirectoryMap")).Items = mapEntries;
         ((DataGrid)window.FindName("LargeFilesGrid")).ItemsSource = new[] { new UsageEntry(@"C:\Example\archive.zip", 123456789, 1) };
-        ((DataGrid)window.FindName("DuplicateGroupsGrid")).ItemsSource = new[] { new DuplicateGroup(new string('A', 64), 12345678, sample.Files.Take(3).ToList()) };
+        ((TextBlock)window.FindName("AnalysisTotal")).Text = Display.Bytes(mapEntries.Sum(x => x.Size));
+        ((TextBlock)window.FindName("AnalysisDetail")).Text = @"C:\ · 示例目录的逻辑大小分布。悬停查看信息，双击矩形或目录继续深入；大文件双击定位。";
+        ((DataGrid)window.FindName("DuplicateGroupsGrid")).ItemsSource = new[] { new DuplicateGroup(new string('A', 64), 12345678, sample.Files.Take(3).Select(f => f with { Size = 12345678 }).ToList()) };
         ((DataGrid)window.FindName("DuplicateGroupsGrid")).SelectedIndex = 0;
         string[] names = ["overview", "cleanup", "analysis", "rules", "history", "duplicates"];
         for (int p = 0; p < 6; p++)
