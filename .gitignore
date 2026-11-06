@@ -1,0 +1,13 @@
+**/bin/
+**/obj/
+dist/
+.vs/
+artifacts/
+**/Data/
+TestResults/
+*.user
+*.suo
+*.sln.docstates
+.env
+.env.*
+!.env.example

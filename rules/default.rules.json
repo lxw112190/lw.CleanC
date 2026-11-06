@@ -1,0 +1,170 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "id": "user-temp",
+      "name": "用户临时文件",
+      "category": "日常清理",
+      "description": "清理超过保留天数的临时文件。",
+      "impact": "部分程序可能仍需旧临时文件；先保存工作并关闭应用。",
+      "paths": [
+        "%LOCALAPPDATA%\\Temp"
+      ],
+      "processes": [],
+      "minAgeDays": 7
+    },
+    {
+      "id": "crash-dumps",
+      "name": "应用崩溃转储",
+      "category": "日常清理",
+      "description": "应用崩溃时生成的诊断文件。",
+      "impact": "删除后无法使用这些转储分析历史崩溃。",
+      "paths": [
+        "%LOCALAPPDATA%\\CrashDumps"
+      ],
+      "processes": [],
+      "minAgeDays": 14
+    },
+    {
+      "id": "directx",
+      "name": "DirectX 着色器缓存",
+      "category": "日常清理",
+      "description": "本机 DirectX 着色器缓存。",
+      "impact": "下次运行游戏可能需要重新编译着色器。",
+      "paths": [
+        "%LOCALAPPDATA%\\D3DSCache"
+      ],
+      "processes": [],
+      "minAgeDays": 7
+    },
+    {
+      "id": "chrome",
+      "name": "Chrome 浏览器缓存",
+      "category": "软件缓存",
+      "description": "Default 与编号配置的缓存，不包含 Cookie、密码和历史记录。",
+      "impact": "需要关闭 Chrome；首次访问网页需重新加载资源。",
+      "paths": [
+        "%LOCALAPPDATA%\\Google\\Chrome\\User Data\\Default\\Cache",
+        "%LOCALAPPDATA%\\Google\\Chrome\\User Data\\Default\\Code Cache",
+        "%LOCALAPPDATA%\\Google\\Chrome\\User Data\\Default\\GPUCache"
+      ],
+      "processes": [
+        "chrome"
+      ],
+      "minAgeDays": 7
+    },
+    {
+      "id": "edge",
+      "name": "Edge 浏览器缓存",
+      "category": "软件缓存",
+      "description": "Default 与编号配置的缓存，不包含登录信息。",
+      "impact": "需要关闭 Edge；网页资源将重新下载。",
+      "paths": [
+        "%LOCALAPPDATA%\\Microsoft\\Edge\\User Data\\Default\\Cache",
+        "%LOCALAPPDATA%\\Microsoft\\Edge\\User Data\\Default\\Code Cache",
+        "%LOCALAPPDATA%\\Microsoft\\Edge\\User Data\\Default\\GPUCache"
+      ],
+      "processes": [
+        "msedge"
+      ],
+      "minAgeDays": 7
+    },
+    {
+      "id": "npm",
+      "name": "npm 下载缓存",
+      "category": "开发缓存",
+      "description": "常见默认位置的 npm 内容缓存，不触碰项目 node_modules。",
+      "impact": "需要关闭 Node 进程；下次安装依赖可能需要联网。",
+      "paths": [
+        "%LOCALAPPDATA%\\npm-cache\\_cacache",
+        "%APPDATA%\\npm-cache\\_cacache"
+      ],
+      "processes": [
+        "node"
+      ],
+      "minAgeDays": 7
+    },
+    {
+      "id": "pip",
+      "name": "pip 下载与构建缓存",
+      "category": "开发缓存",
+      "description": "默认位置的 pip HTTP 与 wheel 缓存。",
+      "impact": "需要关闭 Python 进程；依赖可能需重新下载或编译。",
+      "paths": [
+        "%LOCALAPPDATA%\\pip\\Cache"
+      ],
+      "processes": [
+        "python",
+        "pythonw",
+        "pip"
+      ],
+      "minAgeDays": 7
+    },
+    {
+      "id": "nuget",
+      "name": "NuGet HTTP 缓存",
+      "category": "开发缓存",
+      "description": "只清理 HTTP 与插件缓存，不删除 .nuget/packages。",
+      "impact": "需要关闭 .NET 构建与 IDE；下次还原可能需要联网。",
+      "paths": [
+        "%LOCALAPPDATA%\\NuGet\\v3-cache",
+        "%LOCALAPPDATA%\\NuGet\\plugins-cache"
+      ],
+      "processes": [
+        "dotnet",
+        "devenv",
+        "MSBuild"
+      ],
+      "minAgeDays": 7
+    },
+    {
+      "id": "yarn",
+      "name": "Yarn Classic 缓存",
+      "category": "开发缓存",
+      "description": "Yarn Classic 默认全局缓存，不扫描项目目录。",
+      "impact": "下次安装包可能需要联网；项目离线缓存保持原样。",
+      "paths": [
+        "%LOCALAPPDATA%\\Yarn\\Cache"
+      ],
+      "processes": [
+        "node"
+      ],
+      "minAgeDays": 7
+    },
+    {
+      "id": "uv",
+      "name": "uv 缓存",
+      "category": "开发缓存",
+      "description": "uv 缓存需要由官方命令管理，不能逐文件删除。",
+      "impact": "仅统计预览；在概览页使用 uv 官方清理，处理整个缓存且不受保留天数限制。",
+      "paths": [
+        "%LOCALAPPDATA%\\uv\\cache"
+      ],
+      "processes": [
+        "uv",
+        "python",
+        "pythonw"
+      ],
+      "minAgeDays": 14,
+      "analysisOnly": true
+    },
+    {
+      "id": "vscode",
+      "name": "VS Code 界面与扩展下载缓存",
+      "category": "软件缓存",
+      "description": "只清理界面和扩展安装包缓存，不删除扩展、设置、工作区或本地历史。",
+      "impact": "需要关闭 VS Code；界面缓存会重建，扩展安装包可能需重新下载。",
+      "paths": [
+        "%APPDATA%\\Code\\Cache",
+        "%APPDATA%\\Code\\Code Cache",
+        "%APPDATA%\\Code\\GPUCache",
+        "%APPDATA%\\Code\\CachedData",
+        "%APPDATA%\\Code\\CachedExtensionVSIXs"
+      ],
+      "processes": [
+        "Code"
+      ],
+      "minAgeDays": 14
+    }
+  ]
+}
