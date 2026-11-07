@@ -1,6 +1,6 @@
 # lw.CleanC
 
-当前版本：**0.2.1**。详细变化见 [CHANGELOG.md](CHANGELOG.md)。
+当前版本：**0.3.0**。详细变化见 [CHANGELOG.md](CHANGELOG.md)。
 
 [![Build and release](https://github.com/lxw112190/lw.CleanC/actions/workflows/ci.yml/badge.svg)](https://github.com/lxw112190/lw.CleanC/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -50,6 +50,12 @@
 
 ![重复文件分组与路径](docs/screenshots/duplicates.png)
 
+### 专项清理
+
+C/C++ 预编译缓存和显卡着色器缓存需单独勾选。VS 安装临时包单独扫描，核对目录及文件清单、确认安装结束后再处理；存在安装进程或待重启状态时会阻止清理。
+
+![安装临时包专项预览与确认](docs/screenshots/special.png)
+
 ## 已实现
 
 - 空间概览：C 盘已用、可用与总容量。
@@ -57,7 +63,8 @@
 - 空间分析：分析 C 盘或任意本地目录，目录占用矩形图、一级目录排行、最大的 200 个文件、按扩展名的类型统计、目录下钻、定位文件、CSV 导出。
 - 重复文件：选择目录，按大小、文件头尾采样、完整 SHA-256 分阶段筛选相同内容；默认最小 1 MB，可改为 10 MB 或 100 MB。只展示和定位，文件可能在扫描后变化，处理前应自行核对用途。
 - 扫描支持暂停/继续，暂停时也可以直接停止。
-- 11 条扫描规则：用户临时文件、应用崩溃转储、DirectX 缓存、Chrome/Edge 默认配置缓存、VS Code 界面及扩展下载缓存、npm、pip、NuGet HTTP/插件、Yarn Classic、uv 缓存。uv 规则只作统计，通过概览页的官方清理入口处理。
+- 13 条扫描规则：用户临时文件、应用崩溃转储、DirectX 缓存、Chrome/Edge 配置缓存、VS Code 界面及扩展下载缓存、npm、pip、NuGet HTTP/插件、Yarn Classic、uv，以及 C/C++ ipch 和 NVIDIA 着色器专项。uv 规则只作统计，通过概览页的官方清理入口处理。
+- VS 安装临时包专项：按目录特征识别用户 Temp 下的安装负载，独立预览和确认，不受普通缓存保留天数限制。匹配特征不等于证明文件无用，用户需要确认安装结束且无需保留下载包；会再次检查安装进程、待重启标记、排除项及文件身份。
 - 个人设置：编辑 JSON 规则、保留天数、排除目录或单个预览文件。
 - 清理记录：JSONL 逐文件写入直接清理的操作意图与结果，并汇总文件总量和可用空间变化。uv 官方操作记录命令、退出码、输出与可用空间变化，不提供逐文件清单。
 - Windows 存储设置与系统磁盘清理入口，交由系统处理更新文件等项目。
@@ -69,6 +76,12 @@
 3. 关闭相关程序后重新扫描。浏览器、IDE 或开发进程运行时，相关规则会跳过。
 4. 勾选要清理的分类，点击“清理勾选项目”，核对确认对话框。
 5. 如要定位空间来源，使用“空间分析”。大文件只是分析结果，界面不提供直接删除大文件的操作。
+
+“勾选普通项目”不会选中专项缓存。C/C++ 专项只允许 `Microsoft/vscode-cpptools/ipch` 内的 `.ipch` 文件，不清理同级数据库；NVIDIA 专项只扫描 `GLCache`、`DXCache`，首次运行图形软件可能重新编译着色器。先关闭相关软件再扫描。
+
+安装包专项只扫描当前用户 `LocalAppData/Temp` 的直接子目录，通过 VS 包目录命名特征与扩展名白名单筛选。它不会验证每个包的数字签名，也不能判断安装在业务上是否已完成，因此必须自行核对并明确确认。用户 Temp 之外的 Windows Installer 和 ProgramData 安装缓存不在此范围。部分未识别负载会保留；当前不删除空目录。
+
+升级时会备份规则文件，并按已见内置规则 ID 补充新项。已有 ID 的自定义修改保持原样；已记录的删除不会重新加入，路径与自定义规则重叠的新项会跳过。排除列表保持有效。
 
 **清理会永久删除缓存，不进入回收站，也没有撤销功能。** 扫描只读取文件元数据。程序不会主动关闭软件、提权或强制解锁文件。
 
@@ -128,7 +141,7 @@ dotnet run --project tests/CleanC.UiTests -c Release
 powershell -ExecutionPolicy Bypass -File scripts/build.ps1
 ```
 
-最后一个命令执行构建、核心测试、WPF 组件与渲染检查，再生成便携版 `dist/CleanC-portable-win-x64`、精简版 `dist/CleanC-framework-dependent-win-x64`，以及两个 ZIP 和 SHA256 校验文件。39 项核心测试仅操作 `artifacts/tests` 内的隔离文件，涵盖修改/替换文件、锁、排除项、暂停/取消、硬链接、目录联接、统计、矩形图与重复文件分阶段校验。渲染测试使用样本数据，输出六个页面在两种尺寸下的 PNG 到 `artifacts/ui`，并检查搜索、翻页、类型切换和导航状态。它不能替代完整的人工桌面交互验收。
+最后一个命令执行构建、核心测试、WPF 组件与渲染检查，再生成便携版 `dist/CleanC-portable-win-x64`、精简版 `dist/CleanC-framework-dependent-win-x64`，以及两个 ZIP 和 SHA256 校验文件。53 项核心测试仅操作 `artifacts/tests` 内的隔离文件，涵盖修改/替换文件、锁、排除项、暂停/取消、硬链接、目录联接、统计、矩形图与重复文件分阶段校验。渲染测试使用样本数据，输出七个页面在两种尺寸下的 PNG 到 `artifacts/ui`，并检查搜索、翻页、类型切换和导航状态。它不能替代完整的人工桌面交互验收。
 
 ## 参考资料
 
@@ -148,11 +161,11 @@ API 与默认缓存位置参考：
 
 `main` 提交、Pull Request 和手动运行会在 Windows 上构建、测试并上传两种 ZIP；手动运行不会发布 Release。推送与项目版本一致的 `v*` 标签后，会在全部检查通过后自动发布 GitHub Release。
 
-例如当前 `src/CleanC.App/CleanC.App.csproj` 中的版本为 `0.2.1`，提交代码后执行：
+例如当前 `src/CleanC.App/CleanC.App.csproj` 中的版本为 `0.3.0`，提交代码后执行：
 
 ```powershell
-git tag v0.2.1
-git push origin v0.2.1
+git tag v0.3.0
+git push origin v0.3.0
 ```
 
 标签必须与项目版本完全一致。后续发布先修改项目版本及 CHANGELOG，再提交和推送对应标签。CI 使用仓库自带的 `GITHUB_TOKEN`，无需额外配置个人访问令牌；只有发布任务具有 `contents: write` 权限。标签重跑时可继续未完成的草稿，已发布的 Release 不覆盖。

@@ -37,6 +37,9 @@ public sealed class PathPolicy
             Path.Combine(roaming, "Code", "Cache"), Path.Combine(roaming, "Code", "Code Cache"),
             Path.Combine(roaming, "Code", "GPUCache"), Path.Combine(roaming, "Code", "CachedData"),
             Path.Combine(roaming, "Code", "CachedExtensionVSIXs")];
+        if (root.Equals(Path.Combine(local, "Microsoft", "vscode-cpptools", "ipch"), StringComparison.OrdinalIgnoreCase) ||
+            root.Equals(Path.Combine(local, "NVIDIA", "GLCache"), StringComparison.OrdinalIgnoreCase) ||
+            root.Equals(Path.Combine(local, "NVIDIA", "DXCache"), StringComparison.OrdinalIgnoreCase)) return true;
         if (exact.Any(x => root.Equals(x, StringComparison.OrdinalIgnoreCase))) return true;
         // Personal additions must name an explicit cache directory beneath LocalAppData.
         if (!Within(root, local)) return false;
@@ -48,6 +51,14 @@ public sealed class PathPolicy
     }
 
     public bool RequiresOfficialTool(string root) => Within(Normalize(root), Path.Combine(local, "uv"));
+
+    public static bool MatchesFile(CleanupRule rule, string path, string root)
+    {
+        string extension = Path.GetExtension(path);
+        if (root.EndsWith(@"\Microsoft\vscode-cpptools\ipch", StringComparison.OrdinalIgnoreCase) &&
+            !extension.Equals(".ipch", StringComparison.OrdinalIgnoreCase)) return false;
+        return rule.FileExtensions.Length == 0 || rule.FileExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase);
+    }
 
     public static void EnsureNoReparsePoints(string path)
     {
@@ -67,7 +78,8 @@ public sealed class PathPolicy
             if (r is null) throw new InvalidDataException("规则数组不能包含 null。");
             if (string.IsNullOrWhiteSpace(r.Id) || !ids.Add(r.Id) || string.IsNullOrWhiteSpace(r.Name) ||
                 string.IsNullOrWhiteSpace(r.Impact) || r.MinAgeDays < 1 || r.MinAgeDays > 3650 ||
-                r.Paths is null || r.Paths.Length == 0 || r.Processes is null)
+                r.Paths is null || r.Paths.Length == 0 || r.Processes is null || r.FileExtensions is null ||
+                r.FileExtensions.Any(x => string.IsNullOrWhiteSpace(x) || !x.StartsWith('.') || x.IndexOfAny(['*','?','\\','/',':']) >= 0))
                 throw new InvalidDataException($"规则 {r.Id} 缺少必要内容、ID 重复或保留天数不在 1–3650 之间。");
             foreach (var path in r.Paths)
             {

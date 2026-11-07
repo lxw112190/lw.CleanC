@@ -165,6 +165,42 @@
         "Code"
       ],
       "minAgeDays": 14
+    },
+    {
+      "id": "cpp-ipch",
+      "name": "C/C++ IntelliSense 预编译缓存",
+      "category": "开发专项",
+      "description": "仅扫描 VS Code C/C++ 的 ipch 子目录与 .ipch 文件，不删除数据库、源代码或配置。",
+      "impact": "关闭 VS Code 与 C/C++ 语言服务后清理；再次打开项目将重新索引，初次补全可能较慢。",
+      "paths": [
+        "%LOCALAPPDATA%\\Microsoft\\vscode-cpptools\\ipch"
+      ],
+      "processes": [
+        "Code",
+        "cpptools",
+        "cpptools-srv"
+      ],
+      "minAgeDays": 7,
+      "fileExtensions": [
+        ".ipch"
+      ],
+      "reviewRequired": true
+    },
+    {
+      "id": "nvidia-shaders",
+      "name": "NVIDIA 着色器缓存",
+      "category": "显卡专项",
+      "description": "只扫描 GLCache 和 DXCache，不涉及驱动、游戏存档或显卡更新安装包。",
+      "impact": "先关闭游戏、3D 软件和 GPU 任务。缓存会重新编译，首次运行可能卡顿；占用文件会跳过。",
+      "paths": [
+        "%LOCALAPPDATA%\\NVIDIA\\GLCache",
+        "%LOCALAPPDATA%\\NVIDIA\\DXCache"
+      ],
+      "processes": [
+        "NVIDIA App"
+      ],
+      "minAgeDays": 7,
+      "reviewRequired": true
     }
   ]
 }

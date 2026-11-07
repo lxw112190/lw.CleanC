@@ -51,6 +51,7 @@ public sealed class Scanner(PathPolicy policy)
                     }
                     try
                     {
+                        if (!PathPolicy.MatchesFile(rule, path, root)) continue;
                         if (count >= CandidateLimit) { result.Notes.Add("达到 10 万文件预览上限，请分批清理后重新扫描"); break; }
                         var file = NativeFile.Snapshot(path, root, rule.Id);
                         if (file.LastWrite > DateTime.UtcNow.AddDays(-rule.MinAgeDays).ToFileTimeUtc()) continue;

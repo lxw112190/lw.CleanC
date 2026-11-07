@@ -32,8 +32,8 @@ internal static class Program
         ((TextBlock)window.FindName("DriveDetail")).Text = "已用 192 GB / 总计 256 GB · 示例数据";
         ((ProgressBar)window.FindName("DriveBar")).Value = 75;
         ((TextBlock)window.FindName("StatusText")).Text = "软件界面示例 · 使用演示数据，未扫描或清理用户文件。";
-        if (pages.Items.Count != 6) errors.Add("Expected 6 pages");
-        if (((TextBlock)window.FindName("RuleCount")).Text != "11") errors.Add("Rules did not load");
+        if (pages.Items.Count != 7) errors.Add("Expected 7 pages");
+        if (((TextBlock)window.FindName("RuleCount")).Text != "13") errors.Add("Rules did not load or migrate");
         if (((Button)window.FindName("CleanButton")).IsEnabled) errors.Add("Cleaning enabled without preview");
         var sampleRule = new CleanupRule { Id = "sample", Name = "npm 下载缓存", Category = "开发缓存", MinAgeDays = 7,
             Description = "界面渲染测试样本，不是真实扫描结果。", Impact = "下次安装依赖可能需要联网。" };
@@ -53,8 +53,22 @@ internal static class Program
         ((TextBlock)window.FindName("AnalysisDetail")).Text = @"C:\ · 示例目录的逻辑大小分布。悬停查看信息，双击矩形或目录继续深入；大文件双击定位。";
         ((DataGrid)window.FindName("DuplicateGroupsGrid")).ItemsSource = new[] { new DuplicateGroup(new string('A', 64), 12345678, sample.Files.Take(3).Select(f => f with { Size = 12345678 }).ToList()) };
         ((DataGrid)window.FindName("DuplicateGroupsGrid")).SelectedIndex = 0;
-        string[] names = ["overview", "cleanup", "analysis", "rules", "history", "duplicates"];
-        for (int p = 0; p < 6; p++)
+        var installer = new InstallerPlan(@"C:\Example\Temp\installer-demo");
+        installer.Files.Add(sample.Files[0] with { Path = @"C:\Example\Temp\installer-demo\Microsoft.Demo.0123456789ABCDEF\payload.msi", RuleId = "vs-installer-temp" });
+        ((DataGrid)window.FindName("InstallerGrid")).ItemsSource = new[]{installer};
+        ((DataGrid)window.FindName("InstallerGrid")).SelectedIndex = 0;
+        if (((Button)window.FindName("InstallerCleanButton")).IsEnabled) errors.Add("Installer cleanup enabled without acknowledgement");
+        typeof(MainWindow).GetField("installerPlans", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(window,new List<InstallerPlan>{installer});
+        typeof(MainWindow).GetField("installerBlockReason", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(window,null);
+        installer.Selected = true;
+        ((CheckBox)window.FindName("InstallerConfirmed")).IsChecked = true;
+        if (!((Button)window.FindName("InstallerCleanButton")).IsEnabled) errors.Add("Confirmed installer plan could not be selected");
+        typeof(MainWindow).GetField("installerBlockReason", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(window,"Pending reboot");
+        typeof(MainWindow).GetMethod("UpdateInstallerSelection", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(window,null);
+        if (((Button)window.FindName("InstallerCleanButton")).IsEnabled) errors.Add("Blocked installer plan enabled cleanup");
+        ((CheckBox)window.FindName("InstallerConfirmed")).IsChecked = false; installer.Selected = false;
+        string[] names = ["overview", "cleanup", "analysis", "rules", "history", "duplicates", "special"];
+        for (int p = 0; p < 7; p++)
         {
             typeof(MainWindow).GetMethod("ShowPage", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(window, [p]);
             var nav = (IEnumerable<Button>)typeof(MainWindow).GetMethod("NavigationButtons", BindingFlags.Static | BindingFlags.NonPublic)!.Invoke(null, [root])!;
@@ -77,7 +91,7 @@ internal static class Program
             }
         }
         // Validate actual navigation handlers and initial selection totals without invoking cleanup.
-        if (((TextBlock)window.FindName("PageTitle")).Text != "重复文件") errors.Add("Navigation title mismatch");
+        if (((TextBlock)window.FindName("PageTitle")).Text != "专项清理") errors.Add("Navigation title mismatch");
         if (!((TextBlock)window.FindName("ImpactText")).Text.Contains("联网")) errors.Add("Preview selection did not display impact");
         var testAnalysis = new AnalysisResult(@"C:\Example", mapEntries.ToList(), [], 100, 2, 0, false)
         { FileTypes = [new(".bin", 100, 2)] };

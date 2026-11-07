@@ -47,7 +47,7 @@ foreach ($kind in @('portable', 'framework-dependent')) {
     [IO.Compression.ZipFile]::ExtractToDirectory($archive, $extracted)
     & (Join-Path $PSScriptRoot 'verify-portable.ps1') -ReleasePath $extracted -Mode $mode
     if (Test-Path -LiteralPath (Join-Path $extracted 'Data')) { throw 'Startup probe created personal Data' }
-    $destination = "dist/CleanC-$kind-win-x64"
+    $destination = if ($Versioned) { "dist/$prefix-$kind-win-x64" } else { "dist/CleanC-$kind-win-x64" }
     New-Item -ItemType Directory -Force -Path $destination | Out-Null
     Get-ChildItem -LiteralPath $staging -Force | Copy-Item -Destination $destination -Recurse -Force
     $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()

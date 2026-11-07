@@ -53,8 +53,8 @@ public partial class MainWindow : Window
     private void ShowPage(int page)
     {
         Pages.SelectedIndex = page;
-        string[] titles = ["空间概览", "分类清理", "空间分析", "规则与排除", "清理记录", "重复文件"];
-        string[] subtitles = ["看清占用，按需整理。", "每一项都有来源，每一次清理都可核对。", "从目录到文件，找到空间的去向。", "让规则适合你的使用习惯。", "保留每一次操作的结果。", "按内容核对，找到重复占用的文件。"];
+        string[] titles = ["空间概览", "分类清理", "空间分析", "规则与排除", "清理记录", "重复文件", "专项清理"];
+        string[] subtitles = ["看清占用，按需整理。", "每一项都有来源，每一次清理都可核对。", "从目录到文件，找到空间的去向。", "让规则适合你的使用习惯。", "保留每一次操作的结果。", "按内容核对，找到重复占用的文件。", "核对来源与使用状态，再处理大项缓存。"];
         PageTitle.Text = titles[page]; PageSubtitle.Text = subtitles[page];
         foreach (var button in NavigationButtons(LayoutRoot))
         {
@@ -83,6 +83,7 @@ public partial class MainWindow : Window
         busy = true; cancellation = new(); CancelButton.IsEnabled = true;
         scanControl = pauseable ? new ScanControl() : null; PauseButton.IsEnabled = pauseable; PauseButton.Content = "暂停扫描";
         TaskProgress.Visibility = Visibility.Visible; CleanButton.IsEnabled = false; RulesGrid.IsEnabled = false;
+        InstallerGrid.IsEnabled = false; UpdateInstallerSelection();
         try { await action(cancellation.Token); }
         catch (OperationCanceledException) { StatusText.Text = "任务已停止。缓存扫描结果未完成时不会提供清理入口。"; }
         catch (Exception e) { StatusText.Text = "操作失败：" + e.Message; MessageBox.Show(this, e.Message, "CleanC · 操作失败", MessageBoxButton.OK, MessageBoxImage.Error); }
@@ -92,6 +93,8 @@ public partial class MainWindow : Window
             scanControl?.Dispose(); scanControl = null; PauseButton.IsEnabled = false; PauseButton.Content = "暂停扫描";
             TaskProgress.IsIndeterminate = true;
             TaskProgress.Visibility = Visibility.Collapsed; RulesGrid.IsEnabled = true; UpdateSelection(); RefreshDrive();
+            InstallerGrid.IsEnabled = true;
+            UpdateInstallerSelection();
         }
     }
     private void Cancel_Click(object sender, RoutedEventArgs e) { cancellation?.Cancel(); StatusText.Text = "正在停止，请等待当前文件操作完成…"; }
@@ -111,6 +114,16 @@ public partial class MainWindow : Window
     {
         validRules = false; InvalidatePreview();
         var parsed = JsonFiles.Read<RuleDocument>(RulesPath);
+        var shipped = JsonFiles.Read<RuleDocument>(Path.Combine(AppContext.BaseDirectory, "Rules", "default.rules.json"));
+        string statePath = Path.Combine(dataDirectory, "catalog-seen.json");
+        string[] seen = File.Exists(statePath) ? JsonFiles.Read<string[]>(statePath) : RuleCatalog.LegacyIds;
+        var upgraded = RuleCatalog.Upgrade(parsed, shipped, seen, policy);
+        if (upgraded.Rules.Count != parsed.Rules.Count)
+        {
+            File.Copy(RulesPath, Path.Combine(dataDirectory, $"rules-backup-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}.json"));
+            JsonFiles.Write(RulesPath, upgraded); parsed = upgraded;
+        }
+        JsonFiles.Write(statePath, shipped.Rules.Select(r => r.Id).Concat(seen).Distinct(StringComparer.OrdinalIgnoreCase).ToArray());
         policy.Validate(parsed); document = parsed; validRules = true;
         RuleCount.Text = document.Rules.Count.ToString(); StatusText.Text = $"已载入 {document.Rules.Count} 条规则。";
     }
@@ -138,7 +151,7 @@ public partial class MainWindow : Window
         SelectionTotal.Text = $"已勾选 {chosen.Count} 项 · {Display.Bytes(chosen.Sum(r => r.Size))}";
         CleanButton.IsEnabled = !busy && validRules && chosen.Count > 0;
     }
-    private void SelectAll_Click(object sender, RoutedEventArgs e) { if (!busy) foreach (var r in results) r.Selected = r.Count > 0 && !r.Rule.AnalysisOnly; }
+    private void SelectAll_Click(object sender, RoutedEventArgs e) { if (!busy) foreach (var r in results) r.Selected = r.Count > 0 && !r.Rule.AnalysisOnly && !r.Rule.ReviewRequired; }
     private void SelectNone_Click(object sender, RoutedEventArgs e) { if (!busy) foreach (var r in results) r.Selected = false; }
     private void Rule_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
@@ -149,6 +162,7 @@ public partial class MainWindow : Window
         if (row.Rule.Paths.Any(p => p.Contains("\\User Data\\", StringComparison.OrdinalIgnoreCase)))
             PreviewNote.Text += $" 浏览器已发现 {row.Rule.Paths.Length} 个缓存根目录（含编号配置）。";
         if (row.Rule.AnalysisOnly) PreviewNote.Text = $"仅统计超过 {row.Rule.MinAgeDays} 天且无多硬链接的文件，不能代表整个缓存。请在概览页使用 uv 官方清理；该入口处理整个缓存，不按保留天数过滤。";
+        else if (row.Rule.ReviewRequired) PreviewNote.Text += " 专项不会被批量勾选，请阅读影响后单独勾选。";
     }
     private async void UvClean_Click(object sender, RoutedEventArgs e)
     {
@@ -268,7 +282,7 @@ public partial class MainWindow : Window
         if (!preferences.Exclusions.Contains(path, StringComparer.OrdinalIgnoreCase)) preferences.Exclusions.Add(path);
         JsonFiles.Write(SettingsPath, preferences); RefreshExclusions(); InvalidatePreview();
         analysis = null; FoldersGrid.ItemsSource = null; LargeFilesGrid.ItemsSource = null; AnalysisTotal.Text = "未分析";
-        DirectoryMap.Items = null; InvalidateDuplicates();
+        DirectoryMap.Items = null; InvalidateDuplicates(); InvalidateInstaller();
         AnalysisDetail.Text = "排除项已变化，请重新分析。";
         StatusText.Text = "已更新排除列表，请重新扫描。";
     }
@@ -287,7 +301,7 @@ public partial class MainWindow : Window
         if (busy || ExclusionsList.SelectedItem is not string path) return;
         preferences.Exclusions.Remove(path); JsonFiles.Write(SettingsPath, preferences);
         RefreshExclusions(); InvalidatePreview(); analysis = null; FoldersGrid.ItemsSource = null; LargeFilesGrid.ItemsSource = null;
-        DirectoryMap.Items = null; InvalidateDuplicates();
+        DirectoryMap.Items = null; InvalidateDuplicates(); InvalidateInstaller();
         AnalysisTotal.Text = "未分析"; AnalysisDetail.Text = "排除项已变化，请重新分析。";
     }
     private sealed record HistoryRow(string Time, string Status, string Counts, string Bytes, string Delta, string Path);

@@ -38,6 +38,7 @@ public sealed class Cleaner(PathPolicy policy)
                         !group.Rule.Paths.Any(p => PathPolicy.ExpandRoot(p).Equals(root, StringComparison.OrdinalIgnoreCase)) ||
                         PathPolicy.IsExcluded(path, exclusions))
                         throw new IOException("不在当前规则范围内或已加入排除列表。");
+                    if (!PathPolicy.MatchesFile(group.Rule, path, root)) throw new IOException("文件类型不在规则范围内。");
                     PathPolicy.EnsureNoReparsePoints(path);
                     if (file.LastWrite > DateTime.UtcNow.AddDays(-group.Rule.MinAgeDays).ToFileTimeUtc()) throw new IOException("文件未超过保留天数。");
                     if (Processes.AnyRunning(group.Rule.Processes)) throw new IOException("相关程序正在运行。");

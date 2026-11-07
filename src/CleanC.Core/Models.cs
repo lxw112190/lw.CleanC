@@ -26,6 +26,8 @@ public sealed record CleanupRule
     public string[] Processes { get; init; } = [];
     public int MinAgeDays { get; init; } = 7;
     public bool AnalysisOnly { get; init; }
+    public string[] FileExtensions { get; init; } = [];
+    public bool ReviewRequired { get; init; }
 }
 
 public sealed record RuleDocument
@@ -49,6 +51,7 @@ public sealed class RuleResult(CleanupRule rule) : INotifyPropertyChanged
     public string Name => Rule.Name;
     public string Category => Rule.Category;
     public string Impact => Rule.Impact;
+    public string ModeText => Rule.AnalysisOnly ? "仅统计" : Rule.ReviewRequired ? "专项确认" : "普通清理";
     public long Size => Files.Sum(f => f.Size);
     public string SizeText => Display.Bytes(Size);
     public int Count => Files.Count;

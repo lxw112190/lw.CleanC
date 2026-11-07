@@ -2,6 +2,15 @@ using System.Runtime.InteropServices;
 using System.Text.Json;
 using CleanC.Core;
 
+if (args.Contains("--scan-installers"))
+{
+    using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+    var plans = new InstallerCleanup().Scan([], null, limit.Token);
+    foreach (var plan in plans) Console.WriteLine($"{plan.Root}: {plan.SizeText}, {plan.Count} files");
+    Console.WriteLine("Read-only installer scan: " + Display.Bytes(plans.Sum(p => p.Size)) + "; " + (InstallerCleanup.GetBlockReason() ?? "No installer/reboot block detected; user confirmation still required."));
+    return 0;
+}
+
 if (args.Contains("--scan-local"))
 {
     using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(30));
@@ -303,6 +312,115 @@ Test("History summary reads a bounded tail instead of traversing a large audit",
     string file = Path.Combine(fixture, "large-history.jsonl");
     File.WriteAllText(file, new string('a', 700000) + "\n{\"kind\":\"summary\",\"note\":\"中文\"}\r\n");
     Check(HistoryTail.ReadLastLine(file) == "{\"kind\":\"summary\",\"note\":\"中文\"}", "History tail incorrect");
+});
+Test("C++ rule filters non-ipch files in both preview and stale cleanup", () =>
+{
+    var r = Rule("cpp-types") with { FileExtensions = [".ipch"] };
+    string valid = Write(r,"index.ipch"), protectedFile = Write(r,"history.db");
+    Check(Scan(r)[0].Count == 1, "Database included");
+    var forged = new RuleResult(r); forged.Files.Add(NativeFile.Snapshot(protectedFile, r.Paths[0], r.Id));
+    var summary = Clean([forged]); Check(summary.Deleted == 0 && File.Exists(protectedFile), "File filter bypassed at deletion");
+    Check(File.Exists(valid), "Unselected file changed");
+});
+Test("Built-in C++ protection cannot be bypassed by clearing JSON extension filter", () =>
+{
+    string root = Path.Combine(fixture,"Microsoft","vscode-cpptools","ipch");
+    var r = Rule("cpp-hard-limit") with { Paths = [root] };
+    Write(r,"cache.ipch"); Write(r,"important.db");
+    Check(Scan(r)[0].Count == 1, "Hardcoded C++ type boundary failed");
+});
+Test("Catalog migration preserves modified and intentionally removed old rules", () =>
+{
+    var old = Rule("catalog-old") with { MinAgeDays = 30 }; var added = Rule("catalog-new");
+    var deleted = Rule("catalog-deleted");
+    var migrated = RuleCatalog.Upgrade(new(){ Rules = [old] }, new(){ Rules = [old with { MinAgeDays = 7 }, added, deleted] }, [old.Id,deleted.Id], policy);
+    Check(migrated.Rules.Count == 2 && migrated.Rules[0].MinAgeDays == 30 && migrated.Rules[1].Id == added.Id, "User customization overwritten");
+    var again = RuleCatalog.Upgrade(migrated, new(){ Rules = [old,added,deleted] }, [old.Id,added.Id,deleted.Id], policy);
+    Check(again.Rules.Count == 2, "Repeated migration changed catalog");
+});
+Test("Catalog migration skips a new overlapping root instead of breaking existing rules", () =>
+{
+    var old = Rule("overlap-catalog"); var child = old with { Id = "new-overlap", Paths = [Path.Combine(old.Paths[0],"nested")] };
+    var merged = RuleCatalog.Upgrade(new(){ Rules = [old] },new(){ Rules = [child] },[old.Id],policy);
+    Check(merged.Rules.Count == 1, "Overlapping rule appended");
+});
+(InstallerCleanup Service, string Root, string Package, string File) InstallerFixture(string id, Func<string?>? block = null)
+{
+    string temp = Path.Combine(fixture,id,"Temp"), root = Path.Combine(temp,"bundle");
+    string package = Path.Combine(root,"Microsoft.Test.Package.0123456789ABCDEF"); Directory.CreateDirectory(package);
+    string file = Path.Combine(package,"payload.msi"); File.WriteAllText(file,"synthetic installer payload");
+    return (new InstallerCleanup(temp, block ?? (() => null)),root,package,file);
+}
+Test("Installer preview finds recent package payloads while excluding unrelated files", () =>
+{
+    var f = InstallerFixture("installer-preview"); File.WriteAllText(Path.Combine(f.Package,"personal.docx"),"keep");
+    File.WriteAllText(Path.Combine(f.Root,"root.exe"),"keep");
+    var plans = f.Service.Scan([],null,default);
+    Check(plans.Count == 1 && plans[0].Count == 1 && plans[0].Files[0].Path == f.File, "Installer pattern too broad");
+});
+Test("Installer cleanup refuses absent completion acknowledgement", () =>
+{
+    var f = InstallerFixture("installer-confirm"); bool rejected = false;
+    try { f.Service.Clean(f.Service.Scan([],null,default),[],false,Path.Combine(fixture,"logs"),null,default); }
+    catch (InvalidOperationException) { rejected = true; }
+    Check(rejected && File.Exists(f.File), "Unconfirmed cleanup allowed");
+});
+Test("Installer cleanup handles recent files only after explicit confirmation and audits them", () =>
+{
+    var f = InstallerFixture("installer-clean"); var plans = f.Service.Scan([],null,default);
+    var summary = f.Service.Clean(plans,[],true,Path.Combine(fixture,"logs"),null,default);
+    Check(summary.Deleted == 1 && !File.Exists(f.File) && Directory.Exists(f.Package), "Incorrect installer deletion");
+    Check(File.ReadAllLines(summary.LogPath).Length == 4, "Missing intent/result/summary audit");
+});
+Test("Installer cleanup blocks pending restart or active installation", () =>
+{
+    var f = InstallerFixture("installer-block",()=>"Synthetic pending restart");
+    Reject(()=>f.Service.Clean(f.Service.Scan([],null,default),[],true,Path.Combine(fixture,"logs"),null,default));
+    Check(File.Exists(f.File), "Blocked installer deleted");
+});
+Test("Installer cleanup rechecks blockers during deletion", () =>
+{
+    int calls = 0; var f = InstallerFixture("installer-race",()=>++calls > 1 ? "Installer started" : null);
+    var summary = f.Service.Clean(f.Service.Scan([],null,default),[],true,Path.Combine(fixture,"logs"),null,default);
+    Check(summary.Deleted == 0 && summary.Skipped == 1 && File.Exists(f.File), "Late blocker ignored");
+});
+Test("Installer cleanup rechecks exclusions and file identity", () =>
+{
+    var f = InstallerFixture("installer-changed"); var plans = f.Service.Scan([],null,default); File.AppendAllText(f.File,"changed");
+    var summary = f.Service.Clean(plans,[],true,Path.Combine(fixture,"logs"),null,default);
+    Check(summary.Deleted == 0 && File.Exists(f.File), "Changed installer deleted");
+    var fresh = f.Service.Scan([],null,default);
+    var excluded = f.Service.Clean(fresh,[f.File],true,Path.Combine(fixture,"logs"),null,default);
+    Check(excluded.Deleted == 0 && excluded.Skipped == 1, "Installer exclusion ignored");
+});
+Test("Installer cleanup rejects forged candidates outside direct Temp children", () =>
+{
+    var f = InstallerFixture("installer-escape"); string outside = Path.Combine(fixture,"outside-installer"); Directory.CreateDirectory(outside);
+    string file = Path.Combine(outside,"payload.msi"); File.WriteAllText(file,"keep");
+    var plan = new InstallerPlan(outside); plan.Files.Add(NativeFile.Snapshot(file,outside,"vs-installer-temp"));
+    var summary = f.Service.Clean([plan],[],true,Path.Combine(fixture,"logs"),null,default);
+    Check(summary.Deleted == 0 && summary.Skipped == 1 && File.Exists(file), "Installer boundary bypassed");
+});
+Test("Installer scan never follows a package junction", () =>
+{
+    var f = InstallerFixture("installer-junction");
+    string target = Path.Combine(fixture,"installer-link-target");Directory.CreateDirectory(target);File.WriteAllText(Path.Combine(target,"payload.msi"),"keep");
+    TestNative.CreateJunction(Path.Combine(f.Root,"Microsoft.Linked.0123456789ABCDEF"),target);
+    Check(f.Service.Scan([],null,default).Single().Count == 1,"Installer scan followed junction");
+});
+Test("Installer cleanup preserves files on cancellation", () =>
+{
+    var f = InstallerFixture("installer-cancel"); var plans = f.Service.Scan([],null,default);
+    using var cts = new CancellationTokenSource();cts.Cancel();
+    var summary = f.Service.Clean(plans,[],true,Path.Combine(fixture,"logs"),null,cts.Token);
+    Check(summary.Cancelled && summary.Deleted == 0 && File.Exists(f.File),"Installer cancellation ignored");
+});
+Test("Installer cleanup skips locked files without forcing deletion", () =>
+{
+    var f = InstallerFixture("installer-locked"); var plans = f.Service.Scan([],null,default);
+    using var handle = new FileStream(f.File,FileMode.Open,FileAccess.Read,FileShare.None);
+    var summary = f.Service.Clean(plans,[],true,Path.Combine(fixture,"logs"),null,default);
+    Check(summary.Deleted == 0 && summary.Skipped == 1,"Installer file lock ignored");
 });
 Console.WriteLine($"\n{passed} passed; {failed} failed. Fixture: {fixture}");
 return failed == 0 ? 0 : 1;
