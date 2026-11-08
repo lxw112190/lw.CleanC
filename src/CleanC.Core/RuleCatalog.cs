@@ -10,8 +10,9 @@ public static class RuleCatalog
         var rules = current.Rules.ToList();
         foreach (var rule in shipped.Rules.Where(r => !known.Contains(r.Id) && !rules.Any(x => x.Id.Equals(r.Id, StringComparison.OrdinalIgnoreCase))))
         {
-            var paths = rules.SelectMany(r => r.Paths).Select(PathPolicy.ExpandRoot).ToArray();
-            if (rule.Paths.Select(PathPolicy.ExpandRoot).Any(p => paths.Any(q => PathPolicy.Within(p,q) || PathPolicy.Within(q,p)))) continue;
+            var paths = rules.SelectMany(r => r.Paths.Select(p => (Path: PathPolicy.ExpandRoot(p), Rule: r))).ToArray();
+            if (rule.Paths.Select(PathPolicy.ExpandRoot).Any(p => paths.Any(q =>
+                (PathPolicy.Within(p,q.Path) || PathPolicy.Within(q.Path,p)) && !policy.CanShareRoot(rule,p,q.Rule,q.Path)))) continue;
             rules.Add(rule);
         }
         var merged = current with { Rules = rules }; policy.Validate(merged); return merged;

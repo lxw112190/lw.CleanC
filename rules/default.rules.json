@@ -169,7 +169,7 @@
     {
       "id": "cpp-ipch",
       "name": "C/C++ IntelliSense 预编译缓存",
-      "category": "开发专项",
+      "category": "开发缓存",
       "description": "仅扫描 VS Code C/C++ 的 ipch 子目录与 .ipch 文件，不删除数据库、源代码或配置。",
       "impact": "关闭 VS Code 与 C/C++ 语言服务后清理；再次打开项目将重新索引，初次补全可能较慢。",
       "paths": [
@@ -189,7 +189,7 @@
     {
       "id": "nvidia-shaders",
       "name": "NVIDIA 着色器缓存",
-      "category": "显卡专项",
+      "category": "显卡缓存",
       "description": "只扫描 GLCache 和 DXCache，不涉及驱动、游戏存档或显卡更新安装包。",
       "impact": "先关闭游戏、3D 软件和 GPU 任务。缓存会重新编译，首次运行可能卡顿；占用文件会跳过。",
       "paths": [
@@ -201,6 +201,80 @@
       ],
       "minAgeDays": 7,
       "reviewRequired": true
+    },
+    {
+      "id": "vs-installer-temp",
+      "name": "VS 安装临时包",
+      "category": "安装缓存",
+      "handler": "vs-installer-temp",
+      "description": "按 VS 包目录特征识别当前用户 Temp 内的下载负载，每个安装目录独立勾选。目录特征不能证明文件无用。",
+      "impact": "须确认安装已完成；以后修复或修改 VS 可能需要重新下载。安装器运行、相关待重启状态或占用文件会阻止清理。",
+      "paths": [ "%LOCALAPPDATA%\\Temp" ],
+      "processes": [],
+      "minAgeDays": 0,
+      "reviewRequired": true,
+      "confirmation": "我确认安装已完成、无需保留这些下载包；以后修复或修改 VS 可能需要重新下载。安装包不按保留天数过滤。"
+    },
+    {
+      "id": "qq-diagnostic-logs",
+      "name": "QQ 诊断日志",
+      "category": "软件日志",
+      "description": "仅 QQ.tlg 及数字滚动副本，不包含消息数据库、接收文件或网页登录数据。",
+      "impact": "请退出 QQ；删除后无法使用这些旧日志排查历史故障。",
+      "paths": [ "%APPDATA%\\Tencent\\Logs" ],
+      "processes": [ "QQ" ],
+      "minAgeDays": 7,
+      "fileNamePatterns": [ "QQ.tlg", "QQ.tlg.*" ]
+    },
+    {
+      "id": "wechat-diagnostic-logs",
+      "name": "微信历史诊断日志",
+      "category": "软件日志",
+      "description": "仅 log/mm_日期.xlog 和 radium/host_日期.xlog，保留映射文件、聊天数据库及其他未知类型。",
+      "impact": "请退出微信；删除后无法使用这些旧日志排查历史故障。",
+      "paths": [ "%APPDATA%\\Tencent\\xwechat\\log" ],
+      "processes": [ "Weixin", "WeChat" ],
+      "minAgeDays": 7,
+      "fileExtensions": [ ".xlog" ],
+      "fileNamePatterns": [ "mm_????????.xlog", "host_????????.xlog" ]
+    },
+    {
+      "id": "wemeet-diagnostic-logs",
+      "name": "腾讯会议诊断日志",
+      "category": "软件日志",
+      "description": "仅 Global/Logs 当前目录中的 .log，不扫描录制视频、聊天或用户资料。",
+      "impact": "请退出腾讯会议；删除后无法使用这些旧日志排查历史故障。",
+      "paths": [ "%APPDATA%\\Tencent\\WeMeet\\Global\\Logs" ],
+      "processes": [ "wemeetapp" ],
+      "minAgeDays": 7,
+      "fileExtensions": [ ".log" ]
+    },
+    {
+      "id": "360chromex",
+      "name": "360 极速浏览器 X 缓存",
+      "category": "软件缓存",
+      "description": "仅 Default 与编号配置的 Cache、Code Cache、GPUCache，保留 Cookie、密码及历史记录。",
+      "impact": "请退出 360 极速浏览器 X；网页资源会重新下载或编译。",
+      "paths": [
+        "%LOCALAPPDATA%\\360ChromeX\\Chrome\\User Data\\Default\\Cache",
+        "%LOCALAPPDATA%\\360ChromeX\\Chrome\\User Data\\Default\\Code Cache",
+        "%LOCALAPPDATA%\\360ChromeX\\Chrome\\User Data\\Default\\GPUCache"
+      ],
+      "processes": [ "360ChromeX" ],
+      "minAgeDays": 7
+    },
+    {
+      "id": "chrome-shaders",
+      "name": "Chrome 着色器缓存",
+      "category": "软件缓存",
+      "description": "仅 User Data 根目录的 GrShaderCache 和 ShaderCache，不涉及站点离线存储或配置。",
+      "impact": "请退出 Chrome；着色器会重新编译，首次运行网页图形内容可能变慢。",
+      "paths": [
+        "%LOCALAPPDATA%\\Google\\Chrome\\User Data\\GrShaderCache",
+        "%LOCALAPPDATA%\\Google\\Chrome\\User Data\\ShaderCache"
+      ],
+      "processes": [ "chrome" ],
+      "minAgeDays": 7
     }
   ]
 }

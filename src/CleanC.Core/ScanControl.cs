@@ -13,10 +13,10 @@ public sealed class ScanControl : IDisposable
 public static class RuleResolver
 {
     // Deliberately restricted discovery: numbered Chromium profiles and the same explicit cache leaf only.
-    public static RuleDocument Resolve(RuleDocument document)
+    public static RuleDocument Resolve(RuleDocument document) => Resolve(document, Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
+    internal static RuleDocument Resolve(RuleDocument document, string local)
     {
-        string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        string[] browsers = [Path.Combine(local, "Google", "Chrome", "User Data"), Path.Combine(local, "Microsoft", "Edge", "User Data")];
+        string[] browsers = BrowserCaches.Bases(local).Select(b => b.Root).ToArray();
         return document with { Rules = document.Rules.Select(rule => rule with
         {
             Paths = rule.Paths.SelectMany(raw =>
@@ -27,7 +27,7 @@ public static class RuleResolver
                     string parent = Path.GetDirectoryName(root) ?? "";
                     if (!parent.Equals(Path.Combine(browser, "Default"), StringComparison.OrdinalIgnoreCase)) continue;
                     string leaf = Path.GetFileName(root);
-                    if (leaf is not ("Cache" or "Code Cache" or "GPUCache")) continue;
+                    if (!new[] { "Cache", "Code Cache", "GPUCache" }.Contains(leaf, StringComparer.OrdinalIgnoreCase)) continue;
                     return DiscoverProfiles(browser, leaf).Prepend(root);
                 }
                 return new[] { root };

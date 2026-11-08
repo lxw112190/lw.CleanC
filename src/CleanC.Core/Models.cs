@@ -27,7 +27,10 @@ public sealed record CleanupRule
     public int MinAgeDays { get; init; } = 7;
     public bool AnalysisOnly { get; init; }
     public string[] FileExtensions { get; init; } = [];
+    public string[] FileNamePatterns { get; init; } = [];
     public bool ReviewRequired { get; init; }
+    public string Handler { get; init; } = "files";
+    public string Confirmation { get; init; } = "";
 }
 
 public sealed record RuleDocument
@@ -48,14 +51,23 @@ public sealed class RuleResult(CleanupRule rule) : INotifyPropertyChanged
     public CleanupRule Rule { get; } = rule;
     public List<FileCandidate> Files { get; } = [];
     public List<string> Notes { get; } = [];
-    public string Name => Rule.Name;
+    public string? Scope { get; init; }
+    public string Name => Scope is null ? Rule.Name : $"{Rule.Name} · {Path.GetFileName(Scope)}";
     public string Category => Rule.Category;
     public string Impact => Rule.Impact;
-    public string ModeText => Rule.AnalysisOnly ? "仅统计" : Rule.ReviewRequired ? "专项确认" : "普通清理";
+    public bool RequiresConfirmation => ConfirmationText.Length > 0;
+    public bool IncludeRecentFiles { get; init; }
+    public string ConfirmationText => string.Join("\n", new[] { CleanupHandlers.ConfirmationFor(Rule), IncludeRecentFiles ?
+        "我确认相关浏览器已关闭；此项包含近期可重建缓存，不按保留天数过滤。网页资源和着色器可能重新下载或编译。" : "" }.Where(s => s.Length > 0));
+    public string RetentionText => IncludeRecentFiles ? "已包含近期浏览器缓存，不按保留天数过滤。" : CleanupHandlers.RetentionFor(Rule);
+    public string ModeText => Rule.AnalysisOnly ? "仅统计" : RequiresConfirmation ? "需确认" : Rule.ReviewRequired ? "需核对" : "普通清理";
     public long Size => Files.Sum(f => f.Size);
     public string SizeText => Display.Bytes(Size);
     public int Count => Files.Count;
-    public string Status => string.Join("；", Notes.Distinct());
+    public string? BlockReason { get; private set; }
+    public string? Advisory { get; private set; }
+    public string Status => string.Join("；", Notes.Concat(new[] { BlockReason, Advisory }.OfType<string>()).Distinct());
+    public void ApplySafety(CleanupSafetyStatus safety) { BlockReason = safety.BlockReason; Advisory = safety.Advisory; Changed(nameof(Status)); }
     private bool selected;
     public bool Selected { get => selected; set { selected = value && !Rule.AnalysisOnly; Changed(); } }
     public void Refresh() { Changed(nameof(SizeText)); Changed(nameof(Count)); Changed(nameof(Status)); }
@@ -64,6 +76,8 @@ public sealed class RuleResult(CleanupRule rule) : INotifyPropertyChanged
 }
 
 public sealed record ScanProgress(string Message, long FileCount);
+public sealed record CleanupScanOptions(bool IncludeRecentBrowserCaches = false);
+public sealed record CleanupSafetyStatus(string? BlockReason, string? Advisory = null);
 public sealed record UsageEntry(string Path, long Size, long FileCount)
 {
     public string? Label { get; init; }

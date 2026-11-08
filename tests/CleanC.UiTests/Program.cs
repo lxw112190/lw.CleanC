@@ -32,9 +32,10 @@ internal static class Program
         ((TextBlock)window.FindName("DriveDetail")).Text = "已用 192 GB / 总计 256 GB · 示例数据";
         ((ProgressBar)window.FindName("DriveBar")).Value = 75;
         ((TextBlock)window.FindName("StatusText")).Text = "软件界面示例 · 使用演示数据，未扫描或清理用户文件。";
-        if (pages.Items.Count != 7) errors.Add("Expected 7 pages");
-        if (((TextBlock)window.FindName("RuleCount")).Text != "13") errors.Add("Rules did not load or migrate");
+        if (pages.Items.Count != 6) errors.Add("Expected 6 pages without a dedicated installer page");
+        if (((TextBlock)window.FindName("RuleCount")).Text != "19") errors.Add("Rules did not load or migrate");
         if (((Button)window.FindName("CleanButton")).IsEnabled) errors.Add("Cleaning enabled without preview");
+        if (((CheckBox)window.FindName("IncludeRecentBrowserCaches")).IsChecked == true) errors.Add("Recent browser mode enabled by default");
         var sampleRule = new CleanupRule { Id = "sample", Name = "npm 下载缓存", Category = "开发缓存", MinAgeDays = 7,
             Description = "界面渲染测试样本，不是真实扫描结果。", Impact = "下次安装依赖可能需要联网。" };
         var sample = new RuleResult(sampleRule);
@@ -53,22 +54,32 @@ internal static class Program
         ((TextBlock)window.FindName("AnalysisDetail")).Text = @"C:\ · 示例目录的逻辑大小分布。悬停查看信息，双击矩形或目录继续深入；大文件双击定位。";
         ((DataGrid)window.FindName("DuplicateGroupsGrid")).ItemsSource = new[] { new DuplicateGroup(new string('A', 64), 12345678, sample.Files.Take(3).Select(f => f with { Size = 12345678 }).ToList()) };
         ((DataGrid)window.FindName("DuplicateGroupsGrid")).SelectedIndex = 0;
-        var installer = new InstallerPlan(@"C:\Example\Temp\installer-demo");
-        installer.Files.Add(sample.Files[0] with { Path = @"C:\Example\Temp\installer-demo\Microsoft.Demo.0123456789ABCDEF\payload.msi", RuleId = "vs-installer-temp" });
-        ((DataGrid)window.FindName("InstallerGrid")).ItemsSource = new[]{installer};
-        ((DataGrid)window.FindName("InstallerGrid")).SelectedIndex = 0;
-        if (((Button)window.FindName("InstallerCleanButton")).IsEnabled) errors.Add("Installer cleanup enabled without acknowledgement");
-        typeof(MainWindow).GetField("installerPlans", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(window,new List<InstallerPlan>{installer});
-        typeof(MainWindow).GetField("installerBlockReason", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(window,null);
+        var installerRule = new CleanupRule { Id = "vs-installer-temp", Name = "VS 安装临时包", Category = "安装缓存", Handler = "vs-installer-temp", MinAgeDays = 0,
+            Impact = "确认安装结束；以后修复 VS 可能需要重新下载。" };
+        var installer = new RuleResult(installerRule) { Scope = @"C:\Example\Temp\installer-demo" };
+        installer.Files.Add(sample.Files[0] with { Path = @"C:\Example\Temp\installer-demo\Microsoft.Demo.0123456789ABCDEF\payload.msi", Root = installer.Scope, RuleId = installerRule.Id });
+        var secondInstaller = new RuleResult(installerRule) { Scope = @"C:\Example\Temp\installer-other" };
+        secondInstaller.Files.Add(installer.Files[0] with { Path = @"C:\Example\Temp\installer-other\Microsoft.Demo.0123456789ABCDEF\payload.msi", Root = secondInstaller.Scope });
+        typeof(MainWindow).GetMethod("SetCleanupResults", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(window, [new List<RuleResult> { sample, installer, secondInstaller }]);
+        typeof(MainWindow).GetMethod("SelectAll_Click", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(window, [new Button(), new RoutedEventArgs()]);
+        if (!sample.Selected || installer.Selected || secondInstaller.Selected) errors.Add("Bulk selection included confirmation-required packages");
         installer.Selected = true;
-        ((CheckBox)window.FindName("InstallerConfirmed")).IsChecked = true;
-        if (!((Button)window.FindName("InstallerCleanButton")).IsEnabled) errors.Add("Confirmed installer plan could not be selected");
-        typeof(MainWindow).GetField("installerBlockReason", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(window,"Pending reboot");
-        typeof(MainWindow).GetMethod("UpdateInstallerSelection", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(window,null);
-        if (((Button)window.FindName("InstallerCleanButton")).IsEnabled) errors.Add("Blocked installer plan enabled cleanup");
-        ((CheckBox)window.FindName("InstallerConfirmed")).IsChecked = false; installer.Selected = false;
-        string[] names = ["overview", "cleanup", "analysis", "rules", "history", "duplicates", "special"];
-        for (int p = 0; p < 7; p++)
+        if (((Button)window.FindName("CleanButton")).IsEnabled || ((Border)window.FindName("CleanupConfirmationPanel")).Visibility != Visibility.Visible) errors.Add("Installer confirmation was not enforced in the common cleanup UI");
+        ((CheckBox)window.FindName("CleanupAcknowledged")).IsChecked = true;
+        if (!((Button)window.FindName("CleanButton")).IsEnabled) errors.Add("Confirmed installer package blocked common cleanup");
+        installer.ApplySafety(new("需要重启后重新扫描"));
+        if (((Button)window.FindName("CleanButton")).IsEnabled || !((TextBlock)window.FindName("CleanupActionHint")).Text.Contains("需要重启")) errors.Add("Blocked package enabled cleanup or hid its reason");
+        installer.ApplySafety(new(null, "其他目录的待重启操作"));
+        if (!((Button)window.FindName("CleanButton")).IsEnabled) errors.Add("Unrelated pending warning blocked cleanup");
+        secondInstaller.Selected = true;
+        if (((CheckBox)window.FindName("CleanupAcknowledged")).IsChecked == true || ((Button)window.FindName("CleanButton")).IsEnabled) errors.Add("Changing selected directories retained a stale acknowledgement");
+        secondInstaller.Selected = false; installer.Selected = false;
+        if (((Border)window.FindName("CleanupConfirmationPanel")).Visibility != Visibility.Collapsed || !((Button)window.FindName("CleanButton")).IsEnabled) errors.Add("Ordinary cleanup still required installer acknowledgement");
+        if (!((Button)window.FindName("RecheckCleanupButton")).IsEnabled) errors.Add("Common safety recheck unavailable");
+        installer.Selected = true;
+        ((DataGrid)window.FindName("RulesGrid")).SelectedItem = sample;
+        string[] names = ["overview", "cleanup", "analysis", "rules", "history", "duplicates"];
+        for (int p = 0; p < 6; p++)
         {
             typeof(MainWindow).GetMethod("ShowPage", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(window, [p]);
             var nav = (IEnumerable<Button>)typeof(MainWindow).GetMethod("NavigationButtons", BindingFlags.Static | BindingFlags.NonPublic)!.Invoke(null, [root])!;
@@ -91,7 +102,7 @@ internal static class Program
             }
         }
         // Validate actual navigation handlers and initial selection totals without invoking cleanup.
-        if (((TextBlock)window.FindName("PageTitle")).Text != "专项清理") errors.Add("Navigation title mismatch");
+        if (((TextBlock)window.FindName("PageTitle")).Text != "重复文件") errors.Add("Navigation title mismatch");
         if (!((TextBlock)window.FindName("ImpactText")).Text.Contains("联网")) errors.Add("Preview selection did not display impact");
         var testAnalysis = new AnalysisResult(@"C:\Example", mapEntries.ToList(), [], 100, 2, 0, false)
         { FileTypes = [new(".bin", 100, 2)] };
@@ -106,6 +117,17 @@ internal static class Program
         ((TextBox)window.FindName("PreviewSearch")).Text = "package-419";
         typeof(MainWindow).GetMethod("RefreshPreviewMatches", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(window, null);
         if (((DataGrid)window.FindName("PreviewGrid")).Items.Count != 1) errors.Add("Search did not find a file beyond the first page");
+        var recent = new RuleResult(sampleRule) { IncludeRecentFiles = true }; recent.Files.Add(sample.Files[0]);
+        typeof(MainWindow).GetMethod("SetCleanupResults", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(window,[new List<RuleResult>{recent}]);
+        typeof(MainWindow).GetMethod("SelectAll_Click", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(window,[new Button(),new RoutedEventArgs()]);
+        if (recent.Selected) errors.Add("Recent browser scope included in ordinary bulk selection");
+        recent.Selected = true;
+        if (((Button)window.FindName("CleanButton")).IsEnabled || !((TextBlock)window.FindName("CleanupConfirmationText")).Text.Contains("近期")) errors.Add("Recent cache consent not required or not explained");
+        ((CheckBox)window.FindName("CleanupAcknowledged")).IsChecked = true;
+        if (!((Button)window.FindName("CleanButton")).IsEnabled) errors.Add("Confirmed recent cache selection remained disabled");
+        ((CheckBox)window.FindName("IncludeRecentBrowserCaches")).IsChecked = true;
+        if (((DataGrid)window.FindName("RulesGrid")).Items.Count != 0 || ((Button)window.FindName("CleanButton")).IsEnabled) errors.Add("Mode change retained a cleanable stale preview");
+        ((CheckBox)window.FindName("IncludeRecentBrowserCaches")).IsChecked = false;
         typeof(MainWindow).GetMethod("InvalidatePreview", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(window, null);
         if (((DataGrid)window.FindName("PreviewGrid")).Items.Count != 0 || ((Button)window.FindName("CleanButton")).IsEnabled) errors.Add("Invalidation retained stale preview");
         window.Close(); app.Shutdown();

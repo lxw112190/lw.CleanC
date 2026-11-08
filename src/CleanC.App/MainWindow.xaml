@@ -16,7 +16,7 @@
             <TextBlock Text="●  本地运行" Foreground="#6DE4CB" FontWeight="SemiBold"/>
             <TextBlock Text="数据留在你的电脑上" Foreground="#ADC3C7" FontSize="11" Margin="0,6,0,0"/>
           </StackPanel></Border>
-          <TextBlock Text="个人空间工具 / v0.3.0" Foreground="#829FA5" FontSize="11" Margin="4,16,0,0"/>
+          <TextBlock Text="个人空间工具 / v0.5.0" Foreground="#829FA5" FontSize="11" Margin="4,16,0,0"/>
         </StackPanel>
         <StackPanel>
           <Button Content="01   空间概览" Tag="0" Click="Navigate" HorizontalContentAlignment="Left" Margin="0,0,0,10" Background="#21444A" Foreground="White" BorderBrush="#34545B"/>
@@ -25,7 +25,6 @@
           <Button Content="04   规则与排除" Tag="3" Click="Navigate" Margin="0,0,0,10" Background="#21444A" Foreground="White" BorderBrush="#34545B"/>
           <Button Content="05   清理记录" Tag="4" Click="Navigate" Background="#21444A" Foreground="White" BorderBrush="#34545B"/>
           <Button Content="06   重复文件" Tag="5" Click="Navigate" Margin="0,10,0,0" Background="#21444A" Foreground="White" BorderBrush="#34545B"/>
-          <Button Content="07   专项清理" Tag="6" Click="Navigate" Margin="0,10,0,0" Background="#21444A" Foreground="White" BorderBrush="#34545B"/>
         </StackPanel>
       </DockPanel>
     </Border>
@@ -61,7 +60,7 @@
           <Border Style="{StaticResource Card}" Margin="0,0,0,20"><StackPanel>
             <TextBlock Text="从这里开始" FontSize="18" FontWeight="SemiBold"/>
             <TextBlock Text="清理已知缓存，或者找出那些意料之外的大目录。" Foreground="{StaticResource Muted}" Margin="0,9,0,20"/>
-            <WrapPanel><Button Content="扫描日常与开发缓存" Style="{StaticResource Primary}" Click="Scan_Click"/><Button Content="分析整个 C 盘" Click="AnalyzeC_Click"/><Button Content="选择目录分析" Click="ChooseFolder_Click"/><Button Content="uv 官方缓存清理…" Click="UvClean_Click"/></WrapPanel>
+            <WrapPanel><Button Content="扫描清理项目" Style="{StaticResource Primary}" Click="Scan_Click"/><Button Content="分析整个 C 盘" Click="AnalyzeC_Click"/><Button Content="选择目录分析" Click="ChooseFolder_Click"/><Button Content="uv 官方缓存清理…" Click="UvClean_Click"/></WrapPanel>
           </StackPanel></Border>
           <Border Style="{StaticResource Card}"><StackPanel>
             <TextBlock Text="系统空间，交给系统工具" FontSize="17" FontWeight="SemiBold"/>
@@ -71,17 +70,20 @@
         </StackPanel></ScrollViewer></TabItem>
         <TabItem><Grid>
           <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-          <DockPanel Margin="0,0,0,14">
-            <Button Content="扫描缓存" Style="{StaticResource Primary}" Click="Scan_Click"/>
+          <StackPanel Margin="0,0,0,14"><DockPanel>
+            <Button Content="扫描清理项目" Style="{StaticResource Primary}" Click="Scan_Click"/>
             <Button Content="勾选普通项目" Click="SelectAll_Click"/><Button Content="清空勾选" Click="SelectNone_Click"/>
+            <Button x:Name="RecheckCleanupButton" Content="重新检查状态" Click="RecheckCleanupState_Click" IsEnabled="False"/>
             <TextBlock x:Name="SelectionTotal" Text="尚未扫描" VerticalAlignment="Center" HorizontalAlignment="Right"/>
           </DockPanel>
+            <CheckBox x:Name="IncludeRecentBrowserCaches" Content="包含近期浏览器缓存（不按保留天数过滤；须关闭浏览器并额外确认）" Margin="0,8,0,0" Checked="RecentBrowserMode_Changed" Unchecked="RecentBrowserMode_Changed"/>
+          </StackPanel>
           <DataGrid x:Name="RulesGrid" Grid.Row="1" SelectionChanged="Rule_SelectionChanged" IsReadOnly="False">
             <DataGrid.Columns>
               <DataGridTemplateColumn Width="44"><DataGridTemplateColumn.CellTemplate><DataTemplate>
                 <CheckBox IsChecked="{Binding Selected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
               </DataTemplate></DataGridTemplateColumn.CellTemplate></DataGridTemplateColumn>
-              <DataGridTextColumn Header="清理项目" Binding="{Binding Name}" Width="180" IsReadOnly="True"/>
+              <DataGridTextColumn Header="清理项目" Binding="{Binding Name}" Width="220" IsReadOnly="True"/>
               <DataGridTextColumn Header="分类" Binding="{Binding Category}" Width="85" IsReadOnly="True"/>
               <DataGridTextColumn Header="方式" Binding="{Binding ModeText}" Width="85" IsReadOnly="True"/>
               <DataGridTextColumn Header="文件大小" Binding="{Binding SizeText}" Width="100" IsReadOnly="True"/>
@@ -104,10 +106,18 @@
             <DataGrid.Columns><DataGridTextColumn Header="文件路径 · 双击定位" Binding="{Binding Path}" Width="*"/>
               <DataGridTextColumn Header="大小" Binding="{Binding SizeText}" Width="100"/><DataGridTextColumn Header="最后修改" Binding="{Binding ModifiedText}" Width="145"/></DataGrid.Columns>
           </DataGrid>
-          <DockPanel Grid.Row="4" Margin="0,14,0,0"><Button Content="排除此文件" Click="ExcludeFile_Click"/>
-            <Button x:Name="CleanButton" Content="清理勾选项目…" Style="{StaticResource Primary}" DockPanel.Dock="Right" HorizontalAlignment="Right" Click="Clean_Click" IsEnabled="False"/>
-            <TextBlock Text="永久删除缓存；操作前会再次确认范围。" Foreground="{StaticResource Muted}" VerticalAlignment="Center" FontSize="11"/>
-          </DockPanel>
+          <StackPanel Grid.Row="4" Margin="0,12,0,0">
+            <Border x:Name="CleanupConfirmationPanel" Visibility="Collapsed" Background="#FFF3DF" CornerRadius="6" Padding="10" Margin="0,0,0,10">
+              <StackPanel><ScrollViewer MaxHeight="110" VerticalScrollBarVisibility="Auto"><TextBlock x:Name="CleanupConfirmationText" TextWrapping="Wrap" Margin="0,0,0,6"/></ScrollViewer>
+                <CheckBox x:Name="CleanupAcknowledged" Content="我已逐项核对并确认以上条件。" Checked="CleanupAcknowledged_Changed" Unchecked="CleanupAcknowledged_Changed"/>
+              </StackPanel>
+            </Border>
+            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+              <Button Content="排除此文件" Click="ExcludeFile_Click"/>
+              <TextBlock x:Name="CleanupActionHint" Grid.Column="1" Text="请先扫描清理项目。" TextWrapping="Wrap" Foreground="{StaticResource Muted}" VerticalAlignment="Center" FontSize="11" Margin="8,0,12,0"/>
+              <Button x:Name="CleanButton" Grid.Column="2" Content="清理勾选项目…" Style="{StaticResource Primary}" Click="Clean_Click" IsEnabled="False"/>
+            </Grid>
+          </StackPanel>
         </Grid></TabItem>
         <TabItem><Grid>
           <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="155"/><RowDefinition Height="*"/></Grid.RowDefinitions>
@@ -167,29 +177,6 @@
           <DataGrid x:Name="DuplicateFilesGrid" Grid.Row="4" IsReadOnly="True" MouseDoubleClick="DuplicateFile_Open"><DataGrid.Columns>
             <DataGridTextColumn Header="同组文件路径" Binding="{Binding Path}" Width="*"/><DataGridTextColumn Header="大小" Binding="{Binding SizeText}" Width="100"/><DataGridTextColumn Header="最后修改" Binding="{Binding ModifiedText}" Width="145"/>
           </DataGrid.Columns></DataGrid>
-        </Grid></TabItem>
-        <TabItem><Grid>
-          <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-          <StackPanel Margin="0,0,0,12">
-            <WrapPanel><Button Content="扫描 C/C++ 与显卡缓存" Style="{StaticResource Primary}" Click="Scan_Click"/><Button Content="Windows 系统清理" Click="DiskCleanup_Click"/></WrapPanel>
-            <TextBlock Text="应用缓存专项在分类清理页单独勾选：C/C++ 索引和着色器都会重建，首次使用可能变慢。" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,8,0,0"/>
-          </StackPanel>
-          <StackPanel Grid.Row="1" Margin="0,0,0,12">
-            <Button Content="扫描 VS 安装临时包" Click="InstallerScan_Click" HorizontalAlignment="Left"/>
-            <TextBlock x:Name="InstallerStatus" Text="只识别用户 Temp 下的 VS 包目录特征，不扫描 Windows Installer 或 ProgramData 安装缓存。" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,8,0,0"/>
-          </StackPanel>
-          <DataGrid x:Name="InstallerGrid" Grid.Row="2" SelectionChanged="InstallerRow_Changed"><DataGrid.Columns>
-            <DataGridTemplateColumn Width="40"><DataGridTemplateColumn.CellTemplate><DataTemplate><CheckBox IsChecked="{Binding Selected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Checked="InstallerCheck_Changed" Unchecked="InstallerCheck_Changed" HorizontalAlignment="Center"/></DataTemplate></DataGridTemplateColumn.CellTemplate></DataGridTemplateColumn>
-            <DataGridTextColumn Header="临时目录" Binding="{Binding Root}" Width="*" IsReadOnly="True"/><DataGridTextColumn Header="候选大小" Binding="{Binding SizeText}" Width="95" IsReadOnly="True"/><DataGridTextColumn Header="数量" Binding="{Binding Count}" Width="70" IsReadOnly="True"/>
-          </DataGrid.Columns></DataGrid>
-          <TextBlock Grid.Row="3" Text="文件预览 · 每目录前 200 个；清理处理勾选目录的全部候选。目录特征匹配不等于证明文件无用。" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,10,0,8"/>
-          <DataGrid x:Name="InstallerFiles" Grid.Row="4" IsReadOnly="True" MouseDoubleClick="InstallerFile_Open"><DataGrid.Columns>
-            <DataGridTextColumn Header="候选文件 · 双击定位" Binding="{Binding Path}" Width="*"/><DataGridTextColumn Header="大小" Binding="{Binding SizeText}" Width="100"/>
-          </DataGrid.Columns></DataGrid>
-          <StackPanel Grid.Row="5" Margin="0,12,0,0">
-            <CheckBox x:Name="InstallerConfirmed" Content="我确认安装已完成、无需保留这些下载包；专项不按保留天数过滤。" Checked="InstallerCheck_Changed" Unchecked="InstallerCheck_Changed" Margin="0,0,0,10"/>
-            <Button x:Name="InstallerCleanButton" Content="清理勾选的安装临时包…" IsEnabled="False" Click="InstallerClean_Click" Style="{StaticResource Primary}" HorizontalAlignment="Right"/>
-          </StackPanel>
         </Grid></TabItem>
       </TabControl>
       <Grid Grid.Row="2" Margin="0,16,0,0"><Grid.RowDefinitions><RowDefinition Height="3"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>

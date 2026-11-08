@@ -21,19 +21,20 @@ public sealed class Scanner(PathPolicy policy)
 {
     public const int CandidateLimit = 100_000;
     public List<RuleResult> Scan(RuleDocument document, IReadOnlyList<string> exclusions,
-        IProgress<ScanProgress>? progress, CancellationToken token, ScanControl? control = null)
+        IProgress<ScanProgress>? progress, CancellationToken token, ScanControl? control = null, bool includeRecentBrowserCaches = false)
     {
         policy.Validate(document);
+        if (document.Rules.Any(r => r.Handler != "files")) throw new InvalidDataException("多处理器规则请使用 CleanupEngine 扫描。");
         var results = new List<RuleResult>(); int count = 0; long examined = 0;
         var timer = Stopwatch.StartNew();
         foreach (var rule in document.Rules)
         {
             control?.Checkpoint(token); token.ThrowIfCancellationRequested();
             var effective = rule with { AnalysisOnly = rule.AnalysisOnly || rule.Paths.Any(p => policy.RequiresOfficialTool(PathPolicy.ExpandRoot(p))) };
-            var result = new RuleResult(effective); results.Add(result);
+            var result = new RuleResult(effective) { IncludeRecentFiles = includeRecentBrowserCaches && policy.AllowsRecentBrowserFiles(effective) }; results.Add(result);
             if (effective.AnalysisOnly) result.Notes.Add("仅统计 · 请使用官方清理入口");
             progress?.Report(new($"正在扫描 · {rule.Name}", count));
-            if (Processes.AnyRunning(rule.Processes)) { result.Notes.Add("相关程序正在运行，关闭后重新扫描"); continue; }
+            if (policy.RelatedProcessRunning(rule)) { result.Notes.Add("相关程序正在运行，关闭后重新扫描"); continue; }
             bool found = false;
             foreach (string raw in rule.Paths)
             {
@@ -51,10 +52,11 @@ public sealed class Scanner(PathPolicy policy)
                     }
                     try
                     {
+                        if (policy.RequiresInstallerHandler(path)) { Note(result, "安装临时包由对应处理器管理，普通清理已跳过"); continue; }
                         if (!PathPolicy.MatchesFile(rule, path, root)) continue;
                         if (count >= CandidateLimit) { result.Notes.Add("达到 10 万文件预览上限，请分批清理后重新扫描"); break; }
                         var file = NativeFile.Snapshot(path, root, rule.Id);
-                        if (file.LastWrite > DateTime.UtcNow.AddDays(-rule.MinAgeDays).ToFileTimeUtc()) continue;
+                        if (!result.IncludeRecentFiles && file.LastWrite > DateTime.UtcNow.AddDays(-rule.MinAgeDays).ToFileTimeUtc()) continue;
                         result.Files.Add(file); count++;
                         if (count % 512 == 0) progress?.Report(new($"正在扫描 · {rule.Name}", count));
                     }
@@ -62,8 +64,8 @@ public sealed class Scanner(PathPolicy policy)
                 }
             }
             if (!found) result.Notes.Add("未发现目录");
-            else if (result.Files.Count == 0 && result.Notes.Count == 0) result.Notes.Add("没有超过保留天数的文件");
-            else if (result.Notes.Count == 0) result.Notes.Add($"保留最近 {rule.MinAgeDays} 天");
+            else if (result.Files.Count == 0 && result.Notes.Count == 0) result.Notes.Add(result.IncludeRecentFiles ? "没有符合条件的缓存" : "没有超过保留天数的文件");
+            else if (result.Notes.Count == 0) result.Notes.Add(result.RetentionText);
         }
         return results;
     }
