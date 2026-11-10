@@ -757,6 +757,68 @@ Test("Mandatory browser process detection blocks both preview and stale cleanup 
     Check(File.Exists(f.Recent) && File.Exists(f.Old),"Active browser did not block stale cleanup");
 });
 
+Test("Renamed small documents and renamed files over one MB are found in the same folder", () =>
+{
+    var r=Rule("renamed-customer-case"); string a=Write(r,"活动方案(1).docx",content:new string('s',14000));
+    string b=Write(r,"不同名称(3).bin",age:1,content:new string('s',14000));
+    Write(r,"说明(1).pdf",content:new string('b',2_790_000)); Write(r,"说明(2).pdf",content:new string('b',2_790_000));
+    var result=DuplicateFinder.Find(r.Paths[0],[],DuplicateFinder.DefaultMinimumSize,null,default);
+    Check(result.Groups.Count==2 && result.Candidates==4 && result.Groups.All(g=>g.Count==2),"Renamed small or large file missed");
+    Check(File.Exists(a) && File.Exists(b),"Duplicate checking modified documents");
+    Check(DuplicateFinder.Find(r.Paths[0],[],1048576,null,default).BelowMinimum==2,"Explicit one-MB filtering not reported");
+});
+Test("Multiple roots compare across directories and remove overlapping input roots", () =>
+{
+    var r=Rule("duplicate-multi");Write(r,"one/a",content:"matching contents");Write(r,"two/renamed",content:"matching contents");
+    string one=Path.Combine(r.Paths[0],"one"),two=Path.Combine(r.Paths[0],"two");
+    var result=DuplicateFinder.Find(new[]{one,two},[],1,null,default);
+    Check(result.Roots.Count==2 && result.Groups.Count==1 && result.Groups[0].Count==2,"Cross-directory match missed");
+    var overlap=DuplicateFinder.Find(new[]{one,r.Paths[0],two,r.Paths[0].ToUpperInvariant()},[],1,null,default);
+    Check(overlap.Roots.Count==1 && overlap.Candidates==2 && overlap.Groups.Single().Count==2,"Overlapping roots double-counted files");
+});
+Test("Duplicate diagnostics distinguish size filtering and explicit exclusions", () =>
+{
+    var r=Rule("duplicate-diagnostics");Write(r,"one",content:"same");string exclude=Write(r,"two",content:"same");
+    Write(r,"tiny",content:"x");Write(r,"empty",content:"");
+    var result=DuplicateFinder.Find(r.Paths[0],[exclude],2,null,default);
+    Check(result.Candidates==1 && result.BelowMinimum==2 && result.ExcludedEntries==1 && result.Skipped==0,"Filtering diagnostics inaccurate");
+    Check(result.Groups.Count==0,"Excluded file contributed a duplicate");
+});
+Test("Pair verification ignores filenames and extensions for both small and large files", () =>
+{
+    foreach(int size in new[]{14000,2_790_000})
+    {
+        var r=Rule("verify-pair-"+size);string a=Write(r,"原文件.pdf",content:new string('a',size));string b=Write(r,"重新命名.docx",age:1,content:new string('a',size));
+        var result=DuplicateFinder.ComparePair(a,b,default);
+        Check(result.Identical && result.Left.Size==size && result.Left.Hash.Length==64 && result.Left.Hash==result.Right.Hash,"Renamed pair verification failed");
+    }
+});
+Test("Pair verification distinguishes equal displayed sizes and equal real sizes with different bytes", () =>
+{
+    var r=Rule("pair-different");string a=Write(r,"one.pdf",content:new string('x',10000)+"A"+new string('x',10000));
+    string b=Write(r,"two.pdf",content:new string('x',10000)+"B"+new string('x',10000));
+    var sameSize=DuplicateFinder.ComparePair(a,b,default);
+    Check(!sameSize.Identical && sameSize.Left.Size==sameSize.Right.Size && sameSize.Left.Hash!=sameSize.Right.Hash,"Equal size treated as equal content");
+    File.AppendAllText(b,"x");var roundedSize=DuplicateFinder.ComparePair(a,b,default);
+    Check(!roundedSize.Identical && roundedSize.Left.Size!=roundedSize.Right.Size,"Byte-size difference hidden");
+});
+Test("Pair verification reports empty-file equality while folder default excludes empty files", () =>
+{
+    var r=Rule("pair-empty");string a=Write(r,"empty1",content:""),b=Write(r,"empty2",content:"");
+    Check(DuplicateFinder.ComparePair(a,b,default).Identical,"Empty pair hashing failed");
+    Check(DuplicateFinder.Find(r.Paths[0],[],1,null,default).BelowMinimum==2,"Empty scan entries not explained");
+});
+Test("Pair verification rejects same path, cancellation and locked files without modifying them", () =>
+{
+    var r=Rule("pair-guards");string a=Write(r,"one"),b=Write(r,"two");Reject(()=>DuplicateFinder.ComparePair(a,a,default));
+    using var cts=new CancellationTokenSource();cts.Cancel();bool cancelled=false;
+    try{DuplicateFinder.ComparePair(a,b,cts.Token);}catch(OperationCanceledException){cancelled=true;}
+    Check(cancelled,"Pair cancellation ignored");
+    using var handle=new FileStream(b,FileMode.Open,FileAccess.Read,FileShare.None);bool locked=false;
+    try{DuplicateFinder.ComparePair(a,b,default);}catch(Exception e)when(Scanner.IsFileError(e)){locked=true;}
+    Check(locked && File.Exists(a) && File.Exists(b),"Pair verifier forced access or modified files");
+});
+
 Console.WriteLine($"\n{passed} passed; {failed} failed. Fixture: {fixture}");
 return failed == 0 ? 0 : 1;
 

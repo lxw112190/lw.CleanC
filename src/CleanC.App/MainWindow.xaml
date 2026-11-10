@@ -16,7 +16,7 @@
             <TextBlock Text="●  本地运行" Foreground="#6DE4CB" FontWeight="SemiBold"/>
             <TextBlock Text="数据留在你的电脑上" Foreground="#ADC3C7" FontSize="11" Margin="0,6,0,0"/>
           </StackPanel></Border>
-          <TextBlock Text="个人空间工具 / v0.5.0" Foreground="#829FA5" FontSize="11" Margin="4,16,0,0"/>
+          <TextBlock Text="个人空间工具 / v0.5.1" Foreground="#829FA5" FontSize="11" Margin="4,16,0,0"/>
         </StackPanel>
         <StackPanel>
           <Button Content="01   空间概览" Tag="0" Click="Navigate" HorizontalContentAlignment="Left" Margin="0,0,0,10" Background="#21444A" Foreground="White" BorderBrush="#34545B"/>
@@ -164,11 +164,12 @@
         <TabItem><Grid>
           <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="2*"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
           <WrapPanel Margin="0,0,0,14">
-            <Button Content="选择目录检查重复文件" Style="{StaticResource Primary}" Click="ChooseDuplicates_Click"/>
+            <Button Content="选择目录检查重复文件…" Style="{StaticResource Primary}" Click="ChooseDuplicates_Click"/>
+            <Button Content="对比两个文件…" Click="CompareDuplicatePair_Click"/>
             <TextBlock Text="最小文件" VerticalAlignment="Center" Margin="4,0,8,0"/>
-            <ComboBox x:Name="DuplicateMinimum" SelectedIndex="0" Width="100" VerticalContentAlignment="Center"><ComboBoxItem Content="1 MB" Tag="1048576"/><ComboBoxItem Content="10 MB" Tag="10485760"/><ComboBoxItem Content="100 MB" Tag="104857600"/></ComboBox>
+            <ComboBox x:Name="DuplicateMinimum" SelectedIndex="0" Width="145" VerticalContentAlignment="Center"><ComboBoxItem Content="全部非空文件" Tag="1"/><ComboBoxItem Content="1 MB" Tag="1048576"/><ComboBoxItem Content="10 MB" Tag="10485760"/><ComboBoxItem Content="100 MB" Tag="104857600"/></ComboBox>
           </WrapPanel>
-          <TextBlock x:Name="DuplicateDetail" Grid.Row="1" Text="按大小 → 文件头尾 → 完整 SHA-256 筛选。只读取本地文件，跳过硬链接和云占位文件，不提供自动删除。" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,0,0,14"/>
+          <TextBlock x:Name="DuplicateDetail" Grid.Row="1" Text="按内容比较，文件名和扩展名不影响结果。默认检查全部非空文件；可同时选择多个目录，包含各自子目录。排除项仍生效，跳过硬链接和云占位文件；仅定位，不自动删除。" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,0,0,14"/>
           <DataGrid x:Name="DuplicateGroupsGrid" Grid.Row="2" IsReadOnly="True" SelectionChanged="DuplicateGroup_Changed"><DataGrid.Columns>
             <DataGridTextColumn Header="每份大小" Binding="{Binding SizeText}" Width="100"/><DataGridTextColumn Header="份数" Binding="{Binding Count}" Width="70"/>
             <DataGridTextColumn Header="额外逻辑大小" Binding="{Binding ExtraText}" Width="125"/><DataGridTextColumn Header="示例文件" Binding="{Binding Example}" Width="*"/>

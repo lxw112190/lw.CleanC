@@ -68,22 +68,45 @@ public partial class MainWindow
     private async void ChooseDuplicates_Click(object sender, RoutedEventArgs e)
     {
         if (busy || !validSettings) return;
-        var dialog = new OpenFolderDialog { Title = "选择目录检查重复文件（会读取文件内容）" };
+        var dialog = new OpenFolderDialog { Title = "选择一个或多个目录一起检查重复文件（包含子目录）", Multiselect = true };
         if (dialog.ShowDialog(this) != true) return;
         long minimum = long.Parse((string)((ComboBoxItem)DuplicateMinimum.SelectedItem).Tag, CultureInfo.InvariantCulture);
         await RunJob(async token =>
         {
             DuplicateGroupsGrid.ItemsSource = null; DuplicateFilesGrid.ItemsSource = null; duplicates = null;
             var progress = Progress(); var excluded = preferences.Exclusions.ToArray();
-            var found = await Task.Run(() => DuplicateFinder.Find(dialog.FolderName, excluded, minimum, progress, token, scanControl));
+            var found = await Task.Run(() => DuplicateFinder.Find(dialog.FolderNames, excluded, minimum, progress, token, scanControl));
             duplicates = found; DuplicateGroupsGrid.ItemsSource = found.Groups;
-            DuplicateDetail.Text = $"{found.Root} · {found.Examined:N0} 个文件 · {found.Groups.Count:N0} 组 SHA-256 相同文件 · 额外逻辑大小 {Display.Bytes(found.Groups.Sum(g => g.ExtraLogicalBytes))} · 跳过 {found.Skipped:N0} 项 · 已读取 {Display.Bytes(found.BytesRead)}。{(found.Cancelled ? "已停止，仅显示已校验组。" : found.Limited ? "达到 10 万候选上限，结果不完整。" : "检查完成。")} 结果代表扫描时的内容，额外逻辑大小不是保证可释放空间。";
-            StatusText.Text = "重复文件检查结束。双击文件路径定位，处理前请核对用途。";
+            DuplicateDetail.Text = $"{found.Roots.Count} 个目录（含子目录） · 发现 {found.Examined:N0} 个文件 / 参与 {found.Candidates:N0} 个 · 最小大小 {(minimum == 1 ? "全部非空文件" : Display.Bytes(minimum))} · 大小过滤 {found.BelowMinimum:N0} 个 / 排除 {found.ExcludedEntries:N0} 项 / 访问、链接或变化跳过 {found.Skipped:N0} 项 · {found.Groups.Count:N0} 组内容相同文件 · 额外逻辑大小 {Display.Bytes(found.Groups.Sum(g => g.ExtraLogicalBytes))}。{(found.Cancelled ? "已停止，仅显示已校验组。" : found.Limited ? "达到 10 万候选上限，结果不完整；请缩小扫描范围。" : "检查完成。")} 文件名和扩展名不参与比较；内容相似但字节不同的文件不归为完全重复。";
+            DuplicateDetail.ToolTip = string.Join("\n", found.Roots.Concat(found.SkipExamples));
+            StatusText.Text = found.Limited ? "重复检查未覆盖全部文件：已达 10 万候选上限，请缩小范围。" : found.Cancelled ? "重复检查已停止，结果不完整。" : "重复文件检查结束。双击文件路径定位；悬停说明可查看范围和跳过示例。";
         }, pauseable: true);
     }
     private void DuplicateGroup_Changed(object sender, SelectionChangedEventArgs e)
     {
         DuplicateFilesGrid.ItemsSource = (DuplicateGroupsGrid.SelectedItem as DuplicateGroup)?.Files;
+    }
+    private async void CompareDuplicatePair_Click(object sender, RoutedEventArgs e)
+    {
+        if (busy) return;
+        var dialog = new OpenFileDialog { Title = "选择两份文件，直接校验内容（不受目录扫描最小大小和排除项过滤）", Multiselect = true };
+        if (dialog.ShowDialog(this) != true) return;
+        if (dialog.FileNames.Length != 2) { StatusText.Text = "请一次选择且仅选择两个文件进行内容校验。"; return; }
+        await RunJob(async token =>
+        {
+            duplicates = null; DuplicateGroupsGrid.ItemsSource = null; DuplicateFilesGrid.ItemsSource = null;
+            var compared = await Task.Run(() => DuplicateFinder.ComparePair(dialog.FileNames[0], dialog.FileNames[1], token), token);
+            string conclusion = compared.Identical ? "两份文件内容完全相同，改名或修改扩展名不影响判断。" :
+                compared.Left.Size != compared.Right.Size ? "两份文件的实际字节数不同，不是完全相同的文件。" : "两份文件字节数相同，但 SHA-256 不同，内容并非完全一致。";
+            string detail = conclusion + string.Concat(new[] { compared.Left, compared.Right }.Select(file =>
+                $"\n\n{file.Path}\n实际大小：{file.Size:N0} 字节\nSHA-256：{file.Hash}"));
+            DuplicateDetail.Text = conclusion + " 目录扫描默认检查全部非空文件；具体哈希与路径见校验结果窗口。";
+            StatusText.Text = "两文件内容校验完成，只读取了所选文件。";
+            var output = new TextBox { Text = detail, IsReadOnly = true, TextWrapping = TextWrapping.Wrap,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Margin = new Thickness(16), Padding = new Thickness(10) };
+            new Window { Owner = this, Title = "CleanC · 文件内容校验（可选中复制）", Width = 780, Height = 430,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner, Content = output }.ShowDialog();
+        });
     }
     private void DuplicateFile_Open(object sender, MouseButtonEventArgs e)
     {

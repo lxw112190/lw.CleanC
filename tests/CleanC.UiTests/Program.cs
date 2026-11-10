@@ -35,6 +35,7 @@ internal static class Program
         if (pages.Items.Count != 6) errors.Add("Expected 6 pages without a dedicated installer page");
         if (((TextBlock)window.FindName("RuleCount")).Text != "19") errors.Add("Rules did not load or migrate");
         if (((Button)window.FindName("CleanButton")).IsEnabled) errors.Add("Cleaning enabled without preview");
+        if ((string)((ComboBoxItem)((ComboBox)window.FindName("DuplicateMinimum")).SelectedItem).Tag != "1") errors.Add("Duplicate scan does not include renamed small files by default");
         if (((CheckBox)window.FindName("IncludeRecentBrowserCaches")).IsChecked == true) errors.Add("Recent browser mode enabled by default");
         var sampleRule = new CleanupRule { Id = "sample", Name = "npm 下载缓存", Category = "开发缓存", MinAgeDays = 7,
             Description = "界面渲染测试样本，不是真实扫描结果。", Impact = "下次安装依赖可能需要联网。" };

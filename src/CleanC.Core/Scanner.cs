@@ -75,13 +75,13 @@ public sealed class Scanner(PathPolicy policy)
     internal static bool IsFileError(Exception e) => e is IOException or InvalidDataException or UnauthorizedAccessException or
         System.ComponentModel.Win32Exception or System.Security.SecurityException;
 
-    internal static IEnumerable<string> Walk(string root, IReadOnlyList<string> exclusions, Action skipped, CancellationToken token, ScanControl? control = null)
+    internal static IEnumerable<string> Walk(string root, IReadOnlyList<string> exclusions, Action skipped, CancellationToken token, ScanControl? control = null, Action? excluded = null)
     {
         var dirs = new Stack<string>(); dirs.Push(root);
         while (dirs.TryPop(out string? dir))
         {
             control?.Checkpoint(token); token.ThrowIfCancellationRequested();
-            if (PathPolicy.IsExcluded(dir, exclusions)) continue;
+            if (PathPolicy.IsExcluded(dir, exclusions)) { excluded?.Invoke(); continue; }
             IEnumerator<string> entries;
             try
             {
@@ -96,7 +96,7 @@ public sealed class Scanner(PathPolicy policy)
                 string path;
                 try { if (!entries.MoveNext()) break; path = entries.Current; }
                 catch (Exception e) when (IsFileError(e)) { skipped(); break; }
-                if (PathPolicy.IsExcluded(path, exclusions)) continue;
+                if (PathPolicy.IsExcluded(path, exclusions)) { excluded?.Invoke(); continue; }
                 FileAttributes attributes;
                 try { attributes = File.GetAttributes(path); }
                 catch (Exception e) when (IsFileError(e)) { skipped(); continue; }
