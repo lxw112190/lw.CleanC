@@ -21,7 +21,11 @@ public sealed class Scanner(PathPolicy policy)
 {
     public const int CandidateLimit = 100_000;
     public List<RuleResult> Scan(RuleDocument document, IReadOnlyList<string> exclusions,
-        IProgress<ScanProgress>? progress, CancellationToken token, ScanControl? control = null, bool includeRecentBrowserCaches = false)
+        IProgress<ScanProgress>? progress, CancellationToken token, ScanControl? control = null, bool includeRecentBrowserCaches = false) =>
+        Scan(document, exclusions, progress, token, control, includeRecentBrowserCaches, CandidateLimit);
+
+    internal List<RuleResult> Scan(RuleDocument document, IReadOnlyList<string> exclusions,
+        IProgress<ScanProgress>? progress, CancellationToken token, ScanControl? control, bool includeRecentBrowserCaches, int limit)
     {
         policy.Validate(document);
         if (document.Rules.Any(r => r.Handler != "files")) throw new InvalidDataException("多处理器规则请使用 CleanupEngine 扫描。");
@@ -32,10 +36,17 @@ public sealed class Scanner(PathPolicy policy)
             control?.Checkpoint(token); token.ThrowIfCancellationRequested();
             var effective = rule with { AnalysisOnly = rule.AnalysisOnly || rule.Paths.Any(p => policy.RequiresOfficialTool(PathPolicy.ExpandRoot(p))) };
             var result = new RuleResult(effective) { IncludeRecentFiles = includeRecentBrowserCaches && policy.AllowsRecentBrowserFiles(effective) }; results.Add(result);
+            if (count >= limit)
+            {
+                result.ScanLimited = true;
+                result.Notes.Add("候选已达上限，此项尚未扫描");
+                continue;
+            }
             if (effective.AnalysisOnly) result.Notes.Add("仅统计 · 请使用官方清理入口");
             progress?.Report(new($"正在扫描 · {rule.Name}", count));
             if (policy.RelatedProcessRunning(rule)) { result.Notes.Add("相关程序正在运行，关闭后重新扫描"); continue; }
             bool found = false;
+            long cutoff = DateTime.UtcNow.AddDays(-rule.MinAgeDays).ToFileTimeUtc();
             foreach (string raw in rule.Paths)
             {
                 string root = PathPolicy.ExpandRoot(raw);
@@ -54,14 +65,20 @@ public sealed class Scanner(PathPolicy policy)
                     {
                         if (policy.RequiresInstallerHandler(path)) { Note(result, "安装临时包由对应处理器管理，普通清理已跳过"); continue; }
                         if (!PathPolicy.MatchesFile(rule, path, root)) continue;
-                        if (count >= CandidateLimit) { result.Notes.Add("达到 10 万文件预览上限，请分批清理后重新扫描"); break; }
                         var file = NativeFile.Snapshot(path, root, rule.Id);
-                        if (!result.IncludeRecentFiles && file.LastWrite > DateTime.UtcNow.AddDays(-rule.MinAgeDays).ToFileTimeUtc()) continue;
+                        if (!result.IncludeRecentFiles && file.LastWrite > cutoff) continue;
+                        if (count >= limit)
+                        {
+                            result.ScanLimited = true;
+                            result.Notes.Add("候选已达上限，此项只显示已扫描部分");
+                            break;
+                        }
                         result.Files.Add(file); count++;
                         if (count % 512 == 0) progress?.Report(new($"正在扫描 · {rule.Name}", count));
                     }
                     catch (Exception e) when (IsFileError(e)) { Note(result, "部分文件不可访问或已跳过链接"); }
                 }
+                if (result.ScanLimited) break;
             }
             if (!found) result.Notes.Add("未发现目录");
             else if (result.Files.Count == 0 && result.Notes.Count == 0) result.Notes.Add(result.IncludeRecentFiles ? "没有符合条件的缓存" : "没有超过保留天数的文件");
@@ -108,13 +125,16 @@ public sealed class Scanner(PathPolicy policy)
     }
 
     public static AnalysisResult Analyze(string root, IReadOnlyList<string> exclusions,
-        IProgress<ScanProgress>? progress, CancellationToken token, ScanControl? control = null)
+        IProgress<ScanProgress>? progress, CancellationToken token, ScanControl? control = null, bool collectSnapshot = false)
     {
         root = PathPolicy.Normalize(root);
         PathPolicy.EnsureNoReparsePoints(root);
         var totals = new Dictionary<string, (long Bytes, long Count)>(StringComparer.OrdinalIgnoreCase);
         var types = new Dictionary<string, (long Bytes, long Count)>(StringComparer.OrdinalIgnoreCase);
         var largest = new PriorityQueue<UsageEntry, long>();
+        var index = collectSnapshot ? new AnalysisDirectoryIndex() : null;
+        string? indexedDirectory = null;
+        long indexedBytes = 0;
         long count = 0, size = 0, skipped = 0; bool cancelled = false;
         try
         {
@@ -123,6 +143,17 @@ public sealed class Scanner(PathPolicy policy)
                 try
                 {
                     var info = new FileInfo(path); long bytes = info.Length;
+                    if (index is not null)
+                    {
+                        string parent = Path.GetDirectoryName(path)!;
+                        if (!string.Equals(parent, indexedDirectory, StringComparison.OrdinalIgnoreCase))
+                        {
+                            if (indexedDirectory is not null) index.AddDirectory(root, indexedDirectory, indexedBytes);
+                            indexedDirectory = parent;
+                            indexedBytes = 0;
+                        }
+                        indexedBytes += bytes;
+                    }
                     string relative = Path.GetRelativePath(root, path);
                     int separator = relative.IndexOf(Path.DirectorySeparatorChar);
                     string group = separator < 0 ? root : Path.Combine(root, relative[..separator]);
@@ -143,10 +174,12 @@ public sealed class Scanner(PathPolicy policy)
             }
         }
         catch (OperationCanceledException) { cancelled = true; }
+        if (indexedDirectory is not null) index!.AddDirectory(root, indexedDirectory, indexedBytes);
         return new(root, totals.Select(k => new UsageEntry(k.Key, k.Value.Bytes, k.Value.Count)
             { Percent = size == 0 ? 0 : k.Value.Bytes * 100.0 / size, Label = k.Key.Equals(root, StringComparison.OrdinalIgnoreCase) ? "当前目录中的文件" : null }).OrderByDescending(x => x.Size).ToList(),
             largest.UnorderedItems.Select(x => x.Element).OrderByDescending(x => x.Size).ToList(), size, count, skipped, cancelled)
         { FileTypes = types.Select(k => new UsageEntry(k.Key, k.Value.Bytes, k.Value.Count)
-            { Percent = size == 0 ? 0 : k.Value.Bytes * 100.0 / size }).OrderByDescending(x => x.Size).ToList() };
+            { Percent = size == 0 ? 0 : k.Value.Bytes * 100.0 / size }).OrderByDescending(x => x.Size).ToList(),
+            SnapshotFolders = index?.Folders ?? [], SnapshotIndexLimited = index?.Limited == true };
     }
 }

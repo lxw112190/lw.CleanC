@@ -10,19 +10,40 @@ public sealed class CleanupEngine
     internal CleanupEngine(PathPolicy policy, InstallerCleanup installer) { this.policy = policy; handlers = new(policy, installer); }
 
     public List<RuleResult> Scan(RuleDocument document, IReadOnlyList<string> exclusions,
-        IProgress<ScanProgress>? progress, CancellationToken token, ScanControl? control = null, CleanupScanOptions? options = null)
+        IProgress<ScanProgress>? progress, CancellationToken token, ScanControl? control = null, CleanupScanOptions? options = null) =>
+        Scan(document, exclusions, progress, token, control, options, Scanner.CandidateLimit);
+
+    internal List<RuleResult> Scan(RuleDocument document, IReadOnlyList<string> exclusions,
+        IProgress<ScanProgress>? progress, CancellationToken token, ScanControl? control, CleanupScanOptions? options, int limit, string? scope = null)
     {
         policy.Validate(document);
         var results = new List<RuleResult>();
+        int remaining = limit;
         foreach (var rule in document.Rules)
         {
             control?.Checkpoint(token); token.ThrowIfCancellationRequested();
-            results.AddRange(handlers.For(rule).Scan(rule, exclusions, progress, token, control, options));
-            if (results.Sum(r => r.Count) > Scanner.CandidateLimit)
-                throw new InvalidDataException("统一扫描超过 10 万候选文件，请缩小规则范围后重新扫描。");
+            if (remaining == 0)
+            {
+                var pending = new RuleResult(rule) { ScanLimited = true };
+                pending.Notes.Add("候选已达上限，此项尚未扫描");
+                results.Add(pending);
+                continue;
+            }
+            var scanned = handlers.For(rule).Scan(rule, exclusions, progress, token, control, options, remaining, scope);
+            results.AddRange(scanned);
+            remaining -= scanned.Sum(row => row.Count);
         }
         RefreshState(results);
         return results;
+    }
+    public List<RuleResult> Rescan(CleanupRule rule, string? scope, int retainedCandidates,
+        IReadOnlyList<string> exclusions, IProgress<ScanProgress>? progress, CancellationToken token,
+        ScanControl? control = null, CleanupScanOptions? options = null)
+    {
+        if (retainedCandidates < 0 || retainedCandidates >= Scanner.CandidateLimit)
+            throw new InvalidOperationException("已有预览占满候选上限，请先分批处理已预览项目。");
+        return Scan(new RuleDocument { Rules = [rule] }, exclusions, progress, token, control, options,
+            Scanner.CandidateLimit - retainedCandidates, scope);
     }
     public void RefreshState(IReadOnlyList<RuleResult> results)
     {
@@ -35,7 +56,7 @@ public sealed class CleanupEngine
 
 internal interface ICleanupHandler
 {
-    List<RuleResult> Scan(CleanupRule rule, IReadOnlyList<string> exclusions, IProgress<ScanProgress>? progress, CancellationToken token, ScanControl? control, CleanupScanOptions? options);
+    List<RuleResult> Scan(CleanupRule rule, IReadOnlyList<string> exclusions, IProgress<ScanProgress>? progress, CancellationToken token, ScanControl? control, CleanupScanOptions? options, int limit, string? scope);
     CleanupSafetyStatus Check(RuleResult row);
     void ValidateFile(RuleResult row, FileCandidate file);
 }
@@ -70,8 +91,8 @@ internal sealed class CleanupHandlers
 
 internal sealed class FileCleanupHandler(PathPolicy policy) : ICleanupHandler
 {
-    public List<RuleResult> Scan(CleanupRule rule, IReadOnlyList<string> exclusions, IProgress<ScanProgress>? progress, CancellationToken token, ScanControl? control, CleanupScanOptions? options) =>
-        new Scanner(policy).Scan(new() { Rules = [rule] }, exclusions, progress, token, control, options?.IncludeRecentBrowserCaches == true);
+    public List<RuleResult> Scan(CleanupRule rule, IReadOnlyList<string> exclusions, IProgress<ScanProgress>? progress, CancellationToken token, ScanControl? control, CleanupScanOptions? options, int limit, string? scope) =>
+        new Scanner(policy).Scan(new() { Rules = [rule] }, exclusions, progress, token, control, options?.IncludeRecentBrowserCaches == true, limit);
     public CleanupSafetyStatus Check(RuleResult row) => new(row.Count > 0 && policy.RelatedProcessRunning(row.Rule) ? "相关程序正在运行，关闭后重新检查状态。" : null);
     public void ValidateFile(RuleResult row, FileCandidate file)
     {
@@ -88,18 +109,26 @@ internal sealed class FileCleanupHandler(PathPolicy policy) : ICleanupHandler
 
 internal sealed class VsInstallerCleanupHandler(InstallerCleanup installer, Func<IReadOnlyList<string>, CleanupSafetyStatus> safety) : ICleanupHandler
 {
-    public List<RuleResult> Scan(CleanupRule rule, IReadOnlyList<string> exclusions, IProgress<ScanProgress>? progress, CancellationToken token, ScanControl? control, CleanupScanOptions? options)
+    public List<RuleResult> Scan(CleanupRule rule, IReadOnlyList<string> exclusions, IProgress<ScanProgress>? progress, CancellationToken token, ScanControl? control, CleanupScanOptions? options, int limit, string? scope)
     {
-        var plans = installer.Scan(exclusions, progress, token, control, rule.Id);
+        var plans = installer.Scan(exclusions, progress, token, control, rule.Id, limit, scope, rule, out bool limited);
         var rows = new List<RuleResult>();
         foreach (var plan in plans)
         {
             var row = new RuleResult(rule) { Scope = plan.Root };
-            row.Files.AddRange(plan.Files.Where(f => PathPolicy.MatchesFile(rule, f.Path, f.Root)));
+            row.Files.AddRange(plan.Files);
             row.Notes.Add(plan.Status); row.Notes.Add("不按保留天数过滤，清理前须确认安装结束");
             if (row.Count > 0) rows.Add(row);
         }
-        if (rows.Count == 0) { var empty = new RuleResult(rule); empty.Notes.Add("未发现符合目录特征和文件类型的安装临时包"); rows.Add(empty); }
+        if (rows.Count == 0) { var empty = new RuleResult(rule) { Scope = scope }; empty.Notes.Add("未发现符合目录特征和文件类型的安装临时包"); rows.Add(empty); }
+        if (limited)
+        {
+            foreach (var row in rows)
+            {
+                row.ScanLimited = true;
+                row.Notes.Add("候选已达上限，安装包只显示已扫描部分");
+            }
+        }
         return rows;
     }
     public CleanupSafetyStatus Check(RuleResult row)

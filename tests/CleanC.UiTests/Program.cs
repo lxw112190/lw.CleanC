@@ -77,6 +77,17 @@ internal static class Program
         secondInstaller.Selected = false; installer.Selected = false;
         if (((Border)window.FindName("CleanupConfirmationPanel")).Visibility != Visibility.Collapsed || !((Button)window.FindName("CleanButton")).IsEnabled) errors.Add("Ordinary cleanup still required installer acknowledgement");
         if (!((Button)window.FindName("RecheckCleanupButton")).IsEnabled) errors.Add("Common safety recheck unavailable");
+        ((DataGrid)window.FindName("RulesGrid")).SelectedItem = installer;
+        if (!((Button)window.FindName("RescanRuleButton")).IsEnabled) errors.Add("Selected rule cannot be rescanned");
+        var rescanned = new RuleResult(installerRule) { Scope = installer.Scope };
+        rescanned.Files.AddRange(installer.Files);
+        installer.Selected = true;
+        ((CheckBox)window.FindName("CleanupAcknowledged")).IsChecked = true;
+        typeof(MainWindow).GetMethod("ReplaceCleanupRows", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(window,
+            [new List<RuleResult> { installer }, new List<RuleResult> { rescanned }]);
+        if (!sample.Selected || !rescanned.Selected || ((CheckBox)window.FindName("CleanupAcknowledged")).IsChecked == true)
+            errors.Add("Replacing a preview changed other selections or retained old consent");
+        installer = rescanned;
         installer.Selected = true;
         ((DataGrid)window.FindName("RulesGrid")).SelectedItem = sample;
         string[] names = ["overview", "cleanup", "analysis", "rules", "history", "duplicates"];

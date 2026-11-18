@@ -105,6 +105,7 @@ public partial class MainWindow : Window
     }
     private void InvalidatePreview()
     {
+        foreach (var row in results) row.PropertyChanged -= RuleResult_Changed;
         results = []; RulesGrid.ItemsSource = results; PreviewGrid.ItemsSource = null;
         CleanupAcknowledged.IsChecked = false;
         previewMatches = []; previewPage = 0; PreviewPageText.Text = "";
@@ -141,8 +142,7 @@ public partial class MainWindow : Window
             var resolved = RuleResolver.Resolve(document); policy.Validate(resolved);
             var scanned = await Task.Run(() => new CleanupEngine(policy).Scan(resolved, excluded, progress, token, scanControl, scanOptions), token);
             SetCleanupResults(scanned);
-            CacheTotal.Text = Display.Bytes(results.Sum(r => r.Size));
-            StatusText.Text = $"清理项目扫描完成 · {results.Sum(r => r.Count):N0} 个文件 · 文件总量 {CacheTotal.Text}；请检查清理影响。";
+            ShowCleanupScanStatus("清理项目扫描完成");
         }, pauseable: true);
     }
     private void RecentBrowserMode_Changed(object sender, RoutedEventArgs e)
@@ -152,13 +152,50 @@ public partial class MainWindow : Window
     }
     private void SetCleanupResults(List<RuleResult> scanned)
     {
+        foreach (var row in results) row.PropertyChanged -= RuleResult_Changed;
         results = scanned; CleanupAcknowledged.IsChecked = false;
-        foreach (var result in results) result.PropertyChanged += (_, args) =>
-        {
-            if (args.PropertyName == nameof(RuleResult.Selected)) CleanupAcknowledged.IsChecked = false;
-            UpdateSelection();
-        };
+        foreach (var row in results) row.PropertyChanged += RuleResult_Changed;
         RulesGrid.ItemsSource = results; UpdateSelection();
+    }
+    private void RuleResult_Changed(object? sender, PropertyChangedEventArgs args)
+    {
+        if (args.PropertyName == nameof(RuleResult.Selected)) CleanupAcknowledged.IsChecked = false;
+        UpdateSelection();
+    }
+    private void ShowCleanupScanStatus(string action)
+    {
+        CacheTotal.Text = Display.Bytes(results.Sum(r => r.Size));
+        int limited = results.Count(r => r.ScanLimited);
+        string coverage = limited > 0 ? $" · 达到十万候选上限，{limited} 项未扫完或尚未扫描" : "";
+        StatusText.Text = $"{action} · {results.Sum(r => r.Count):N0} 个候选 · {CacheTotal.Text}{coverage}";
+    }
+    private async void RescanRule_Click(object sender, RoutedEventArgs e)
+    {
+        if (busy || !validRules || !validSettings || RulesGrid.SelectedItem is not RuleResult row) return;
+        var replaced = results.Where(r => r.Rule.Id == row.Rule.Id && (row.Scope is null || r.Scope == row.Scope)).ToList();
+        if (replaced.Count == 0) return;
+        int retained = results.Sum(r => r.Count) - replaced.Sum(r => r.Count);
+        bool onlyThisItem = retained >= Scanner.CandidateLimit;
+        var options = new CleanupScanOptions(IncludeRecentBrowserCaches.IsChecked == true);
+        await RunJob(async token =>
+        {
+            var excluded = preferences.Exclusions.ToArray();
+            var progress = Progress();
+            var scanned = await Task.Run(() => new CleanupEngine(policy).Rescan(row.Rule, row.Scope, onlyThisItem ? 0 : retained, excluded, progress, token, scanControl, options), token);
+            token.ThrowIfCancellationRequested();
+            ReplaceCleanupRows(onlyThisItem ? results : replaced, scanned);
+            ShowCleanupScanStatus(onlyThisItem ? $"仅扫描了{row.Name}" : $"{row.Name}已重扫");
+        }, pauseable: true);
+    }
+    private void ReplaceCleanupRows(List<RuleResult> previous, List<RuleResult> scanned)
+    {
+        int index = results.IndexOf(previous[0]);
+        var merged = results.Where(r => !previous.Contains(r)).ToList();
+        foreach (var row in scanned)
+            row.Selected = row.Count > 0 && row.BlockReason is null && previous.Any(r => r.Rule.Id == row.Rule.Id && r.Scope == row.Scope && r.Selected);
+        merged.InsertRange(index, scanned);
+        SetCleanupResults(merged);
+        RulesGrid.SelectedItem = scanned[0];
     }
     private void UpdateSelection()
     {
@@ -174,6 +211,16 @@ public partial class MainWindow : Window
         CleanButton.IsEnabled = reason is null;
         CleanupActionHint.Text = reason ?? "可以清理；将再次确认范围，永久删除且不进入回收站。";
         RecheckCleanupButton.IsEnabled = !busy && results.Count > 0;
+        UpdateRescanButton();
+    }
+    private void UpdateRescanButton()
+    {
+        if (RescanRuleButton is null) return;
+        var row = RulesGrid.SelectedItem as RuleResult;
+        RescanRuleButton.IsEnabled = !busy && validRules && validSettings && row is not null;
+        bool full = row is not null && results.Where(r => r.Rule.Id != row.Rule.Id || (row.Scope is not null && r.Scope != row.Scope)).Sum(r => r.Count) >= Scanner.CandidateLimit;
+        RescanRuleButton.Content = full ? "仅扫描此项" : "重新扫描此项";
+        RescanRuleButton.ToolTip = full ? "已有预览占满十万候选。扫描成功后，只保留此项预览。" : "更新选中项目的预览，保留其他项目和勾选。";
     }
     private void CleanupAcknowledged_Changed(object sender, RoutedEventArgs e) => UpdateSelection();
     private void RecheckCleanupState_Click(object sender, RoutedEventArgs e)
@@ -186,7 +233,12 @@ public partial class MainWindow : Window
     private void SelectNone_Click(object sender, RoutedEventArgs e) { if (!busy) foreach (var r in results) r.Selected = false; }
     private void Rule_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (RulesGrid.SelectedItem is not RuleResult row) return;
+        UpdateRescanButton();
+        if (RulesGrid.SelectedItem is not RuleResult row)
+        {
+            RefreshPreviewMatches();
+            return;
+        }
         ImpactText.Text = $"{row.Name} · {row.Rule.Impact}";
         PreviewNote.Text = $"{row.Rule.Description} {row.RetentionText}可搜索全部 {row.Count:N0} 个结果；搜索只影响显示，清理仍处理勾选项目的全部结果。";
         if (row.Scope is not null) PreviewNote.Text += $" 当前目录：{row.Scope}。";
@@ -254,12 +306,14 @@ public partial class MainWindow : Window
         await RunJob(async token =>
         {
             var progress = Progress(); var excluded = preferences.Exclusions.ToArray();
-            var scanned = await Task.Run(() => Scanner.Analyze(root, excluded, progress, token, scanControl));
+            var (scanned, comparison, snapshotNote) = await Task.Run(() => AnalyzeAndRecord(root, excluded, progress, token));
             analysis = scanned;
+            analysisComparison = comparison;
+            CompareAnalysisButton.IsEnabled = comparison is not null;
             FoldersGrid.ItemsSource = scanned.Folders; LargeFilesGrid.ItemsSource = scanned.LargestFiles;
             DirectoryMap.Items = scanned.Folders; RefreshAnalysisView();
             AnalysisTotal.Text = Display.Bytes(scanned.Size);
-            AnalysisDetail.Text = $"{root} · {scanned.FileCount:N0} 个文件 · {Display.Bytes(scanned.Size)} · 跳过 {scanned.Skipped:N0} 项 · {(scanned.Cancelled ? "已停止，显示部分结果" : "扫描结束，无法访问的目录未计入")}。显示逻辑大小，硬链接可能重复计数，不能视为可释放空间。";
+            AnalysisDetail.Text = $"{root} · {scanned.FileCount:N0} 个文件 · 逻辑大小 {Display.Bytes(scanned.Size)} · 跳过 {scanned.Skipped:N0} 项。{snapshotNote}";
             StatusText.Text = scanned.Cancelled ? "空间分析已停止，保留已读结果。" : "空间分析完成；双击目录继续深入，双击大文件定位。";
         }, pauseable: true);
     }
@@ -318,7 +372,7 @@ public partial class MainWindow : Window
         path = PathPolicy.Normalize(path);
         if (!preferences.Exclusions.Contains(path, StringComparer.OrdinalIgnoreCase)) preferences.Exclusions.Add(path);
         JsonFiles.Write(SettingsPath, preferences); RefreshExclusions(); InvalidatePreview();
-        analysis = null; FoldersGrid.ItemsSource = null; LargeFilesGrid.ItemsSource = null; AnalysisTotal.Text = "未分析";
+        analysis = null; ClearAnalysisComparison(); FoldersGrid.ItemsSource = null; LargeFilesGrid.ItemsSource = null; AnalysisTotal.Text = "未分析";
         DirectoryMap.Items = null; InvalidateDuplicates();
         AnalysisDetail.Text = "排除项已变化，请重新分析。";
         StatusText.Text = "已更新排除列表，请重新扫描。";
@@ -337,7 +391,7 @@ public partial class MainWindow : Window
     {
         if (busy || ExclusionsList.SelectedItem is not string path) return;
         preferences.Exclusions.Remove(path); JsonFiles.Write(SettingsPath, preferences);
-        RefreshExclusions(); InvalidatePreview(); analysis = null; FoldersGrid.ItemsSource = null; LargeFilesGrid.ItemsSource = null;
+        RefreshExclusions(); InvalidatePreview(); analysis = null; ClearAnalysisComparison(); FoldersGrid.ItemsSource = null; LargeFilesGrid.ItemsSource = null;
         DirectoryMap.Items = null; InvalidateDuplicates();
         AnalysisTotal.Text = "未分析"; AnalysisDetail.Text = "排除项已变化，请重新分析。";
     }

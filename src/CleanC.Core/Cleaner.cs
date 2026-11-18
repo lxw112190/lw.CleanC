@@ -34,7 +34,7 @@ public sealed class Cleaner
         long Free() => drives.Sum(d => { try { return new DriveInfo(d).AvailableFreeSpace; } catch (IOException) { return 0L; } });
         long before = Free(), logical = 0; int deleted = 0, skipped = 0; bool cancelled = false;
         Audit(new { kind = "start", time = DateTimeOffset.Now, mode = "permanent", count = selected.Sum(x => x.Count),
-            projects = selected.Select(r => new { r.Rule.Id, r.Rule.Handler, r.Scope, r.IncludeRecentFiles }).ToArray(),
+            projects = selected.Select(r => new { r.Rule.Id, r.Rule.Name, r.Rule.Handler, r.Scope, r.IncludeRecentFiles }).ToArray(),
             confirmations = selected.Where(r => r.RequiresConfirmation).Select(r => new { r.Rule.Id, Text = r.ConfirmationText }).Distinct().ToArray() });
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var group in selected)
@@ -64,7 +64,7 @@ public sealed class Cleaner
                 }
                 if (reason is null) { deleted++; logical += file.Size; }
                 else skipped++;
-                Audit(new { kind = reason is null ? "deleted" : "skipped", file.Path, file.Size, reason, time = DateTimeOffset.Now });
+                Audit(new { kind = reason is null ? "deleted" : "skipped", file.Path, file.Size, rule = file.RuleId, reason, time = DateTimeOffset.Now });
                 if ((deleted + skipped) % 32 == 0) progress?.Report(new("正在清理 · " + group.Name, deleted + skipped));
             }
             if (cancelled) break;

@@ -57,6 +57,7 @@ public sealed class RuleResult(CleanupRule rule) : INotifyPropertyChanged
     public string Impact => Rule.Impact;
     public bool RequiresConfirmation => ConfirmationText.Length > 0;
     public bool IncludeRecentFiles { get; init; }
+    public bool ScanLimited { get; internal set; }
     public string ConfirmationText => string.Join("\n", new[] { CleanupHandlers.ConfirmationFor(Rule), IncludeRecentFiles ?
         "我确认相关浏览器已关闭；此项包含近期可重建缓存，不按保留天数过滤。网页资源和着色器可能重新下载或编译。" : "" }.Where(s => s.Length > 0));
     public string RetentionText => IncludeRecentFiles ? "已包含近期浏览器缓存，不按保留天数过滤。" : CleanupHandlers.RetentionFor(Rule);
@@ -89,6 +90,8 @@ public sealed record AnalysisResult(string Root, List<UsageEntry> Folders, List<
     long Size, long FileCount, long Skipped, bool Cancelled)
 {
     public List<UsageEntry> FileTypes { get; init; } = [];
+    public IReadOnlyList<AnalysisFolderTotal> SnapshotFolders { get; init; } = [];
+    public bool SnapshotIndexLimited { get; init; }
 }
 public sealed record CleanupSummary(int Deleted, int Skipped, long LogicalBytes, long FreeSpaceDelta,
     bool Cancelled, string LogPath);

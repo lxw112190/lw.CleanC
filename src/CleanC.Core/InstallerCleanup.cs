@@ -37,13 +37,24 @@ public sealed class InstallerCleanup
         return parts.Length >= 3 && PackageName.IsMatch(parts[1]) && Extensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase);
     }
     internal string? CheckBlockReason(IReadOnlyList<string> roots) => blocked(roots);
-    public List<InstallerPlan> Scan(IReadOnlyList<string> exclusions, IProgress<ScanProgress>? progress, CancellationToken token, ScanControl? control = null, string ruleId = "vs-installer-temp")
+    public List<InstallerPlan> Scan(IReadOnlyList<string> exclusions, IProgress<ScanProgress>? progress, CancellationToken token, ScanControl? control = null, string ruleId = "vs-installer-temp") =>
+        Scan(exclusions, progress, token, control, ruleId, Scanner.CandidateLimit, null, null, out _);
+
+    internal List<InstallerPlan> Scan(IReadOnlyList<string> exclusions, IProgress<ScanProgress>? progress, CancellationToken token,
+        ScanControl? control, string ruleId, int limit, string? scope, CleanupRule? rule, out bool limited)
     {
+        limited = false;
         var plans = new List<InstallerPlan>();
         if (!Directory.Exists(tempRoot)) return plans;
         PathPolicy.EnsureNoReparsePoints(tempRoot);
         int count = 0;
-        foreach (string root in Directory.EnumerateDirectories(tempRoot))
+        if (scope is not null)
+        {
+            scope = PathPolicy.Normalize(scope);
+            if (!string.Equals(Path.GetDirectoryName(scope), tempRoot, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("安装包目录不在用户临时目录内。");
+        }
+        foreach (string root in scope is null ? Directory.EnumerateDirectories(tempRoot) : new[] { scope })
         {
             control?.Checkpoint(token); token.ThrowIfCancellationRequested();
             if (PathPolicy.IsExcluded(root, exclusions)) continue;
@@ -54,16 +65,18 @@ public sealed class InstallerCleanup
                 var plan = new InstallerPlan(root);
                 foreach (string path in Scanner.Walk(root, exclusions, () => { plan.Status = "部分文件不可访问，仍需确认安装已完成"; }, token, control))
                 {
-                    if (!IsCandidatePath(path, root)) continue;
+                    if (!IsCandidatePath(path, root) || (rule is not null && !PathPolicy.MatchesFile(rule, path, root))) continue;
                     try
                     {
-                        if (count >= Scanner.CandidateLimit) throw new InvalidDataException("安装包预览超过 10 万文件，请缩小范围后重试。");
-                        plan.Files.Add(NativeFile.Snapshot(path, root, ruleId)); count++;
+                        var candidate = NativeFile.Snapshot(path, root, ruleId);
+                        if (count >= limit) { limited = true; break; }
+                        plan.Files.Add(candidate); count++;
                         if (count % 64 == 0) progress?.Report(new("识别 VS 安装临时包 · " + Path.GetFileName(root), count));
                     }
                     catch (Exception e) when (Scanner.IsFileError(e) && e is not InvalidDataException) { plan.Status = "部分文件已跳过，仍需确认安装已完成"; }
                 }
                 if (plan.Count > 0) plans.Add(plan);
+                if (limited) break;
             }
             catch (Exception e) when (Scanner.IsFileError(e) && e is not InvalidDataException) { }
         }

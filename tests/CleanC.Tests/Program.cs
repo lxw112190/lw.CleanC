@@ -819,6 +819,72 @@ Test("Pair verification rejects same path, cancellation and locked files without
     Check(locked && File.Exists(a) && File.Exists(b),"Pair verifier forced access or modified files");
 });
 
+Test("Cleanup candidate budget preserves partial previews across handlers", () =>
+{
+    var f = UnifiedFixture("candidate-budget");
+    File.WriteAllText(Path.Combine(Path.GetDirectoryName(f.Installer)!, "second.msi"), "second package");
+    var later = Rule("after-budget");
+    Write(later);
+    var rows = f.Engine.Scan(f.Rules with { Rules = [.. f.Rules.Rules, later] }, [], null, default, null, null, 2);
+    Check(rows.Count == 3 && rows.Sum(r => r.Count) == 2, "Candidate limit lost prior previews or exceeded the budget");
+    Check(!rows[0].ScanLimited && rows[1].ScanLimited && rows[1].Count == 1 && rows[2].ScanLimited && rows[2].Count == 0,
+        "Installer partial and untouched rules were not distinguished");
+    var normal = Rule("limited-ordinary");
+    Write(normal, "first"); Write(normal, "second");
+    var partial = f.Engine.Scan(new() { Rules = [normal] }, [], null, default, null, null, 1).Single();
+    Check(partial.Count == 1 && partial.ScanLimited, "Ordinary scanner did not retain a partial preview");
+});
+
+Test("Rescan discovers a formerly blocked rule without consuming other rows' budget", () =>
+{
+    bool running = true;
+    var p = new PathPolicy(fixture, processCheck: names => running && names.Contains("SyntheticBrowser"));
+    var engine = new CleanupEngine(p);
+    var rule = Rule("rescan-blocked") with { Processes = ["SyntheticBrowser"] };
+    string file = Write(rule);
+    var blocked = engine.Scan(new() { Rules = [rule] }, [], null, default).Single();
+    Check(blocked.Count == 0, "Running rule should not have been scanned");
+    running = false;
+    var refreshed = engine.Rescan(blocked.Rule, null, Scanner.CandidateLimit - 1, [], null, default).Single();
+    Check(refreshed.Files.Single().Path == file && !refreshed.ScanLimited && blocked.Count == 0, "Rescan did not create a new preview");
+});
+
+Test("History details report rule and failure reason, and handle old interrupted records", () =>
+{
+    var rule = Rule("history-details") with { Name = "Fixture cache" };
+    string kept = Write(rule, "keep"); Write(rule, "clean");
+    var preview = new CleanupEngine(policy).Scan(new() { Rules = [rule] }, [], null, default);
+    var cleaned = new Cleaner(policy).Clean(preview, [kept], Path.Combine(fixture, "logs"), null, default);
+    var details = HistoryDetailsReader.Read(cleaned.LogPath, default);
+    Check(details.HasSummary && details.Rows.All(row => row.Rule == rule.Name), "History lost the rule name or summary");
+    Check(details.Rows.Single(r => r.Skipped == 1).Samples.Single() == kept && details.Rows.Sum(r => r.Deleted) == 1, "History skipped or deleted totals differ");
+    string legacy = Path.Combine(fixture, "legacy-history.jsonl");
+    File.WriteAllLines(legacy, ["""{"kind":"intent","Path":"x","rule":"legacy"}""", """{"kind":"deleted","Path":"x"}""",
+        """{"kind":"skipped","Path":"y","reason":"locked"}""", "{"]);
+    details = HistoryDetailsReader.Read(legacy, default);
+    Check(!details.HasSummary && details.InvalidLines == 1 && details.Rows.Any(row => row.Rule == "legacy" && row.Deleted == 1)
+        && details.Rows.Any(row => row.Reason == "locked" && row.Skipped == 1), "Legacy interrupted history did not preserve valid details");
+});
+
+Test("Snapshots compare nested growth and real free space without replacing the baseline on cancel", () =>
+{
+    var rule = Rule("snapshot-fixture");
+    string nested = Write(rule, @"Users\user\AppData\Local\Temp\bundle\app.msi", content: "123");
+    var store = new AnalysisSnapshotStore(Path.Combine(fixture, "snapshot-store"));
+    AnalysisResult Analyze(string[] exclusions) => Scanner.Analyze(rule.Paths[0], exclusions, null, default, collectSnapshot: true);
+    var before = Analyze([]);
+    Check(store.Record(before, [], 1000) is null, "First scan should establish a baseline");
+    Check(store.Record(before with { Cancelled = true }, [], 900) is null, "Cancelled scan supplied a comparison");
+    File.AppendAllText(nested, "4567");
+    string[] exclude = [Path.GetDirectoryName(nested)!];
+    Check(store.Record(Analyze(exclude), exclude, 750) is null, "Different exclusions reused a baseline");
+    var comparison = store.Record(Analyze([]), [], 800)!;
+    var bundle = comparison.Changes.Single(row => row.Path == Path.GetDirectoryName(nested));
+    Check(bundle.Depth == 6 && bundle.Before == 3 && bundle.After == 7 && bundle.Delta == 4, "Nested directory size delta is wrong");
+    Check(comparison.Before.AvailableBytes == 1000 && comparison.After.AvailableBytes == 800 &&
+        comparison.After.LogicalBytes - comparison.Before.LogicalBytes == 4, "Logical and free space metrics were conflated");
+});
+
 Console.WriteLine($"\n{passed} passed; {failed} failed. Fixture: {fixture}");
 return failed == 0 ? 0 : 1;
 
